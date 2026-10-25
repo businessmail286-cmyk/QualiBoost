@@ -1,0 +1,6 @@
+{
+  "name": "QualiBoost - Professional Image Enhancement Interface",
+  "description": "Professional image quality improvement and restoration studio for photographs, portraits, flyers, posters, and graphics. Every Detail. Better.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
