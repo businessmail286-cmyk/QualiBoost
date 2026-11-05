@@ -1,0 +1,57 @@
+From fd7600cb1d1f1a6ca2dda29a4d239596fc3a4c83 Mon Sep 17 00:00:00 2001
+From: businessmail286 <businessmail286@gmail.com>
+Date: Sun, 1 Nov 2026 14:41:26 +0000
+Subject: [PATCH 2/4] fix(cors): default QUALIBOOST_ALLOWED_ORIGINS to wildcard
+ to allow cross-origin browser requests
+
+---
+ qualiboost_backend/app.py | 18 ++++++++++--------
+ render.yaml               |  2 ++
+ 2 files changed, 12 insertions(+), 8 deletions(-)
+
+diff --git a/qualiboost_backend/app.py b/qualiboost_backend/app.py
+index 916e69f..68a7ee6 100644
+--- a/qualiboost_backend/app.py
++++ b/qualiboost_backend/app.py
+@@ -49,18 +49,20 @@ app = FastAPI(
+     description="Local/server API wrapper for the Real-ESRGAN inference script.",
+ )
+ 
+-# CORS configuration
+-origins_setting = os.getenv(
+-    "QUALIBOOST_ALLOWED_ORIGINS",
+-    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000",
+-)
+-allowed_origins = [item.strip() for item in origins_setting.split(",") if item.strip()]
++# CORS configuration - default to allow all origins when credentials are not used
++origins_setting = os.getenv("QUALIBOOST_ALLOWED_ORIGINS", "*").strip()
++if origins_setting == "*" or not origins_setting:
++    cors_origins = ["*"]
++else:
++    cors_origins = [item.strip() for item in origins_setting.split(",") if item.strip()]
++
+ app.add_middleware(
+     CORSMiddleware,
+-    allow_origins=allowed_origins,
++    allow_origins=cors_origins,
+     allow_credentials=False,
+-    allow_methods=["GET", "POST", "OPTIONS"],
++    allow_methods=["GET", "POST", "OPTIONS", "DELETE"],
+     allow_headers=["*"],
++    expose_headers=["*"],
+ )
+ 
+ # In-memory job store (simple, suitable for single-process deployment)
+diff --git a/render.yaml b/render.yaml
+index f2eaa6f..0867201 100644
+--- a/render.yaml
++++ b/render.yaml
+@@ -11,3 +11,5 @@ services:
+         value: 3.10.12
+       - key: REAL_ESRGAN_EXTRA_ARGS
+         value: "--tile 256"
++      - key: QUALIBOOST_ALLOWED_ORIGINS
++        value: "*"
+-- 
+2.34.1
+

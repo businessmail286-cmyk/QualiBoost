@@ -1,0 +1,151 @@
+import os
+import sys
+import uuid
+import shutil
+import tempfile
+import subprocess
+from pathlib import Path
+from typing import Optional
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from PIL import Image, UnidentifiedImageError
+
+ROOT = Path(__file__).resolve().parent.parent
+INFERENCE_SCRIPT = ROOT / "inference_realesrgan.py"
+MAX_UPLOAD_BYTES = int(os.getenv("QUALIBOOST_MAX_UPLOAD_MB", "15")) * 1024 * 1024
+ALLOWED_MODELS = {
+    "RealESRGAN_x4plus",
+    "RealESRGAN_x4plus_anime_6B",
+    "RealESRGAN_x2plus",
+    "realesr-general-x4v3",
+}
+
+app = FastAPI(
+    title="QualiBoost Image Enhancement API",
+    version="1.0.0",
+    description="Local/server API wrapper for the Real-ESRGAN inference script.",
+)
+
+origins_setting = os.getenv(
+    "QUALIBOOST_ALLOWED_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000",
+)
+allowed_origins = [item.strip() for item in origins_setting.split(",") if item.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "engine_source_found": INFERENCE_SCRIPT.is_file(),
+        "message": "API is running. Model weights are downloaded by Real-ESRGAN on first inference if network access is available.",
+    }
+
+
+@app.post("/api/enhance")
+async def enhance(
+    file: UploadFile = File(...),
+    scale: int = Form(4),
+    model: str = Form("RealESRGAN_x4plus"),
+):
+    if not INFERENCE_SCRIPT.is_file():
+        raise HTTPException(status_code=500, detail="Real-ESRGAN inference script was not found.")
+
+    if scale not in (2, 3, 4):
+        raise HTTPException(status_code=400, detail="Scale must be 2, 3, or 4.")
+    if model not in ALLOWED_MODELS:
+        raise HTTPException(status_code=400, detail="Unsupported model selected.")
+
+    raw = await file.read(MAX_UPLOAD_BYTES + 1)
+    if not raw:
+        raise HTTPException(status_code=400, detail="The uploaded file is empty.")
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image is too large. Maximum upload size is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+        )
+
+    # Validate actual image content rather than trusting the filename/MIME type.
+    try:
+        from io import BytesIO
+        with Image.open(BytesIO(raw)) as check:
+            check.verify()
+        with Image.open(BytesIO(raw)) as opened:
+            if opened.format not in ("JPEG", "PNG", "WEBP", "BMP", "TIFF"):
+                raise HTTPException(status_code=415, detail="Use a JPG, PNG, WEBP, BMP, or TIFF image.")
+            image = opened.convert("RGBA" if "A" in opened.getbands() else "RGB")
+    except HTTPException:
+        raise
+    except (UnidentifiedImageError, OSError, ValueError):
+        raise HTTPException(status_code=415, detail="The uploaded file is not a valid supported image.")
+
+    # Each request gets an isolated temporary workspace; it is deleted after response delivery.
+    temp_dir = Path(tempfile.mkdtemp(prefix="qualiboost_"))
+    try:
+        input_path = temp_dir / "input.png"
+        output_dir = temp_dir / "output"
+        output_dir.mkdir()
+        image.save(input_path, format="PNG")
+
+        command = [
+            sys.executable,
+            str(INFERENCE_SCRIPT),
+            "-n", model,
+            "-i", str(input_path),
+            "-o", str(output_dir),
+            "-s", str(scale),
+            "--ext", "png",
+            "--fp32",
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(ROOT),
+                capture_output=True,
+                text=True,
+                timeout=int(os.getenv("QUALIBOOST_PROCESS_TIMEOUT_SECONDS", "600")),
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=504, detail="Image processing timed out. Try a smaller image.")
+
+        if completed.returncode != 0:
+            details = (completed.stderr or completed.stdout or "Unknown Real-ESRGAN error")[-2500:]
+            raise HTTPException(
+                status_code=500,
+                detail="Real-ESRGAN could not process this image. Check that dependencies and model weights are available. " + details,
+            )
+
+        result_path = output_dir / "input_out.png"
+        if not result_path.is_file():
+            candidates = list(output_dir.glob("*.png"))
+            if not candidates:
+                details = (completed.stderr or completed.stdout or "No subprocess output captured.")[-4000:]
+                raise HTTPException(
+                    status_code=500,
+                    detail="No output image was produced. Real-ESRGAN output: " + details,
+                )
+            result_path = candidates[0]
+
+        # FileResponse streams the result; background cleanup removes the request workspace afterwards.
+        from starlette.background import BackgroundTask
+        return FileResponse(
+            path=str(result_path),
+            media_type="image/png",
+            filename="qualiboost-enhanced.png",
+            background=BackgroundTask(shutil.rmtree, str(temp_dir), ignore_errors=True),
+            headers={"Cache-Control": "no-store"},
+        )
+    except Exception:
+        # Avoid leaving uploaded images behind on failures.
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise

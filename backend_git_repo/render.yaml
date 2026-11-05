@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: qualiboost-realesrgan-backend
+    env: python
+    region: oregon
+    plan: starter
+    buildCommand: "pip install --upgrade pip && pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt"
+    startCommand: "uvicorn qualiboost_backend.app:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.17
+      - key: REAL_ESRGAN_EXTRA_ARGS
+        value: "--tile 256"
+      - key: QUALIBOOST_ALLOWED_ORIGINS
+        value: "*"

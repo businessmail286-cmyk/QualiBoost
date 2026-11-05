@@ -13,6 +13,7 @@ interface StageReadyProps {
   isSubmitting?: boolean;
   healthStatus?: BackendHealthStatus | null;
   selectedModel?: string;
+  onOpenBackendSettings?: () => void;
 }
 
 export const StageReady: React.FC<StageReadyProps> = ({
@@ -25,6 +26,7 @@ export const StageReady: React.FC<StageReadyProps> = ({
   isSubmitting = false,
   healthStatus,
   selectedModel = 'RealESRGAN_x4plus',
+  onOpenBackendSettings,
 }) => {
   const formatBytes = (bytes: number) => {
     if (bytes === 0) return '0 B';
@@ -155,12 +157,26 @@ export const StageReady: React.FC<StageReadyProps> = ({
 
             {/* Backend connectivity status hint */}
             {healthStatus && (
-              <div className="flex items-center gap-1.5 text-[11px] font-mono">
-                <Server className="w-3 h-3 text-[#777777]" />
-                <span className="text-[#777777]">Engine:</span>
-                <span className={healthStatus.connected ? 'text-white' : 'text-[#888888]'}>
-                  {healthStatus.connected ? 'Connected (Ready)' : 'Offline / Awaiting Start'}
-                </span>
+              <div className="flex items-center gap-2 text-[11px] font-mono">
+                <div className="flex items-center gap-1.5">
+                  <Server className="w-3 h-3 text-[#777777]" />
+                  <span className="text-[#777777]">Engine:</span>
+                  <span className={healthStatus.connected ? 'text-white' : 'text-[#888888]'}>
+                    {healthStatus.connected ? 'Connected (Ready)' : 'Offline / Awaiting Start'}
+                  </span>
+                </div>
+                {onOpenBackendSettings && (
+                  <>
+                    <span className="text-[#444444]">·</span>
+                    <button
+                      type="button"
+                      onClick={onOpenBackendSettings}
+                      className="text-[#888888] hover:text-white underline underline-offset-2 transition-colors cursor-pointer"
+                    >
+                      Configure URL
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>

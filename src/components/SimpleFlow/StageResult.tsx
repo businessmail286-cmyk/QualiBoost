@@ -59,9 +59,9 @@ export const StageResult: React.FC<StageResultProps> = ({
     if (isExporting) return;
     setIsExporting(true);
 
-    const safeBaseName = metadata.name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const scaleSuffix = result.scale ? `-${result.scale}x` : '';
-    const downloadFilename = `${safeBaseName}-upscaled${scaleSuffix}.${targetFormat === 'png' ? 'png' : 'jpg'}`;
+    const downloadFilename = targetFormat === 'png'
+      ? (result.filename || 'qualiboost-enhanced.png')
+      : 'qualiboost-enhanced.jpg';
 
     try {
       // If user requested PNG and the backend already returned a PNG blob, download directly

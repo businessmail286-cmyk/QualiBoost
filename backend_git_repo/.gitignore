@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env/
+.env.local
+.env.*.local
+*.env
+*.env.*
+!qualiboost_backend/.env.example
+
+# Virtual environments
+.venv/
+env/
+ENV/
+
+# Model weights (downloaded separately)
+weights/
+
+# Direct test outputs
+direct_test_output/
+
+# Test outputs
+test_output/
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# Cog outputs
+output/
+
+# IDE specific
+.vscode/
+*.code-workspace
+
+# PyPI
+dist/
+build/
+*.egg-info/
+
+# Real-ESRGAN specific
+*.pth
+*.jit
+
+# Debug logs
+realesrgan-debug.log

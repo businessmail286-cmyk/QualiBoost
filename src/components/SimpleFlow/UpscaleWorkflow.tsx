@@ -5,17 +5,21 @@ import { StageProcessing } from './StageProcessing';
 import { StageResult } from './StageResult';
 import { StageError } from './StageError';
 import { FlowStage, ImageMetadata, PresetImage, UpscaleResult, ScaleValue } from '../../types';
-import { requestImageUpscale } from '../../services/upscaleService';
+import { requestImageUpscale, UpscaleProgressInfo } from '../../services/upscaleService';
 import { checkBackendHealth, BackendHealthStatus } from '../../config/api';
 
 interface UpscaleWorkflowProps {
   onToast: (msg: string, type?: 'info' | 'error' | 'success') => void;
   externalUploadTrigger?: number;
+  onOpenBackendSettings?: () => void;
+  onHealthChange?: (connected: boolean) => void;
 }
 
 export const UpscaleWorkflow: React.FC<UpscaleWorkflowProps> = ({
   onToast,
   externalUploadTrigger,
+  onOpenBackendSettings,
+  onHealthChange,
 }) => {
   const [stage, setStage] = useState<FlowStage>('upload');
   const [metadata, setMetadata] = useState<ImageMetadata | null>(null);
@@ -25,6 +29,7 @@ export const UpscaleWorkflow: React.FC<UpscaleWorkflowProps> = ({
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [healthStatus, setHealthStatus] = useState<BackendHealthStatus | null>(null);
+  const [progressInfo, setProgressInfo] = useState<UpscaleProgressInfo | null>(null);
 
   const hiddenFileInputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -36,13 +41,14 @@ export const UpscaleWorkflow: React.FC<UpscaleWorkflowProps> = ({
       const status = await checkBackendHealth();
       if (isMounted) {
         setHealthStatus(status);
+        onHealthChange?.(status.connected);
       }
     };
     runCheck();
     return () => {
       isMounted = false;
     };
-  }, [stage]);
+  }, [stage, onHealthChange]);
 
   // External trigger from header button
   useEffect(() => {
@@ -147,7 +153,7 @@ export const UpscaleWorkflow: React.FC<UpscaleWorkflowProps> = ({
 
   // Start real upscaling request
   const handleStartUpscaling = async () => {
-    if (!metadata) return;
+    if (!metadata || isSubmitting) return;
 
     if (result?.enhancedUrl && result.enhancedUrl.startsWith('blob:')) {
       URL.revokeObjectURL(result.enhancedUrl);
@@ -156,11 +162,20 @@ export const UpscaleWorkflow: React.FC<UpscaleWorkflowProps> = ({
     setIsSubmitting(true);
     setStage('processing');
     setErrorMessage('');
+    setProgressInfo(null);
 
     abortControllerRef.current = new AbortController();
 
     try {
-      const res = await requestImageUpscale(metadata, selectedScale, selectedModel, abortControllerRef.current.signal);
+      const res = await requestImageUpscale(
+        metadata,
+        selectedScale,
+        selectedModel,
+        abortControllerRef.current.signal,
+        (info) => {
+          setProgressInfo(info);
+        }
+      );
       setResult(res);
       setStage('result');
       onToast(`Real-ESRGAN ${selectedScale}× inference completed!`, 'success');
@@ -215,6 +230,7 @@ export const UpscaleWorkflow: React.FC<UpscaleWorkflowProps> = ({
             isSubmitting={isSubmitting}
             healthStatus={healthStatus}
             selectedModel={selectedModel}
+            onOpenBackendSettings={onOpenBackendSettings}
           />
         )}
 
@@ -223,6 +239,7 @@ export const UpscaleWorkflow: React.FC<UpscaleWorkflowProps> = ({
           <StageProcessing
             metadata={metadata}
             onCancel={handleCancelProcessing}
+            progressInfo={progressInfo}
           />
         )}
 
@@ -242,6 +259,7 @@ export const UpscaleWorkflow: React.FC<UpscaleWorkflowProps> = ({
             errorMessage={errorMessage}
             onRetry={handleStartUpscaling}
             onReplaceClick={() => hiddenFileInputRef.current?.click()}
+            onOpenBackendSettings={onOpenBackendSettings}
           />
         )}
       </div>

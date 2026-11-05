@@ -8,6 +8,7 @@ interface StageErrorProps {
   errorMessage: string;
   onRetry: () => void;
   onReplaceClick: () => void;
+  onOpenBackendSettings?: () => void;
 }
 
 export const StageError: React.FC<StageErrorProps> = ({
@@ -15,6 +16,7 @@ export const StageError: React.FC<StageErrorProps> = ({
   errorMessage,
   onRetry,
   onReplaceClick,
+  onOpenBackendSettings,
 }) => {
   const isBackendMissing =
     errorMessage.includes('not reached') ||
@@ -57,11 +59,11 @@ export const StageError: React.FC<StageErrorProps> = ({
         {isBackendMissing && (
           <div className="bg-[#111111] border border-[#292929] rounded-xl p-4 text-xs font-mono space-y-2 text-[#A3A3A3]">
             <div className="flex items-center justify-between text-[#777777]">
-              <span>Real-ESRGAN Contract</span>
+              <span>Real-ESRGAN Inference Endpoint</span>
               <span>Endpoint: {enhanceEndpoint}</span>
             </div>
             <p className="text-[#A3A3A3] font-sans leading-normal">
-              QualiBoost’s client-side interface and image upload staging are active. To complete genuine super-resolution inference, run the FastAPI backend (<code className="text-white bg-[#191919] px-1.5 py-0.5 rounded">uvicorn main:app --port 8000</code>) and verify that <code className="text-white bg-[#191919] px-1.5 py-0.5 rounded">GET /health</code> returns <code className="text-white bg-[#191919] px-1.5 py-0.5 rounded">&#123;"status": "ok"&#125;</code>.
+              QualiBoost connects to the Real-ESRGAN backend running in Google Colab via a temporary Cloudflare tunnel (<code className="text-white font-mono">{enhanceEndpoint}</code>). If the connection fails, verify that the Google Colab session and Cloudflare tunnel are active, or configure a new endpoint in Settings.
             </p>
           </div>
         )}
@@ -100,13 +102,26 @@ export const StageError: React.FC<StageErrorProps> = ({
             <span>Choose Different Image</span>
           </button>
 
-          <button
-            onClick={onRetry}
-            className="px-6 py-2.5 text-xs font-semibold uppercase tracking-wider text-[#080808] bg-[#F2F2F2] rounded-lg hover:bg-white active:bg-[#e0e0e0] transition-colors flex items-center gap-2 cursor-pointer shadow-md"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>Retry Request</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {onOpenBackendSettings && (
+              <button
+                type="button"
+                onClick={onOpenBackendSettings}
+                className="px-4 py-2.5 text-xs font-medium text-white bg-[#222222] border border-[#383838] rounded-lg hover:bg-[#2a2a2a] hover:border-[#666666] transition-colors flex items-center gap-2 cursor-pointer"
+              >
+                <Server className="w-3.5 h-3.5 text-[#A3A3A3]" />
+                <span>Configure Backend URL</span>
+              </button>
+            )}
+
+            <button
+              onClick={onRetry}
+              className="px-6 py-2.5 text-xs font-semibold uppercase tracking-wider text-[#080808] bg-[#F2F2F2] rounded-lg hover:bg-white active:bg-[#e0e0e0] transition-colors flex items-center gap-2 cursor-pointer shadow-md"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Retry Request</span>
+            </button>
+          </div>
         </div>
 
       </div>

@@ -176,7 +176,17 @@ export const Workspace: React.FC<WorkspaceProps> = ({
 
     try {
       onToast(`Submitting image to Real-ESRGAN backend (${scaleNum}× scale)...`, 'info');
-      const res = await requestImageUpscale(metadata, scaleNum, 'RealESRGAN_x4plus', abortControllerRef.current.signal);
+      const res = await requestImageUpscale(
+        metadata,
+        scaleNum,
+        'RealESRGAN_x4plus',
+        abortControllerRef.current.signal,
+        (info) => {
+          if (info.message) {
+            onToast(info.message, 'info');
+          }
+        }
+      );
       setResult(res);
       onToast(`Real-ESRGAN inference complete (${res.outputWidth}×${res.outputHeight}px)!`, 'success');
     } catch (err: unknown) {

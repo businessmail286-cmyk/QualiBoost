@@ -1,0 +1,7 @@
+QualiBoost integration files added:
+- qualiboost_backend/app.py: FastAPI wrapper around inference_realesrgan.py
+- qualiboost_backend/requirements-api.txt: API wrapper dependencies
+- qualiboost_backend/run_windows.bat: Windows local launcher
+- qualiboost_backend/README_QUALIBOOST.md: setup and frontend connection instructions
+
+The original frontend/interface was not included in the supplied ZIP, so no frontend files were changed. The original ZIP had no bundled model weight files; Real-ESRGAN may download weights on first run if network access is available. Engine dependencies still need to be installed and verified.

@@ -1,39 +1,48 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, X } from 'lucide-react';
+import { Loader2, X, Clock, ShieldCheck } from 'lucide-react';
 import { ImageMetadata } from '../../types';
+import { UpscaleProgressInfo } from '../../services/upscaleService';
 
 interface StageProcessingProps {
   metadata: ImageMetadata;
   onCancel?: () => void;
+  progressInfo?: UpscaleProgressInfo | null;
 }
 
-const STATUS_MESSAGES = [
-  'Preparing your image...',
-  'Enhancing image details...',
-  'Improving image clarity...',
-  'Finalizing your result...',
+const DEFAULT_MESSAGES = [
+  'Submitting image to Real-ESRGAN backend...',
+  'Analyzing structural edges and visual textures...',
+  'Reconstructing high-frequency details with neural weights...',
+  'Restoring clarity and removing compression artifacts...',
+  'Finalizing enhanced PNG output bytes...',
 ];
 
 export const StageProcessing: React.FC<StageProcessingProps> = ({
   metadata,
   onCancel,
+  progressInfo,
 }) => {
   const [messageIndex, setMessageIndex] = useState(0);
+  const [internalElapsed, setInternalElapsed] = useState(0);
 
-  // Transition through the honest status messages while waiting for backend
+  // Live timer tick
   useEffect(() => {
-    const intervals = [1600, 2400, 2800]; // milliseconds for each phase
-    let currentIdx = 0;
-
     const timer = setInterval(() => {
-      if (currentIdx < STATUS_MESSAGES.length - 1) {
-        currentIdx += 1;
-        setMessageIndex(currentIdx);
-      }
-    }, intervals[currentIdx] || 2500);
-
+      setInternalElapsed((prev) => prev + 1);
+    }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // Transition through status messages
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setMessageIndex((prev) => (prev < DEFAULT_MESSAGES.length - 1 ? prev + 1 : prev));
+    }, 4500);
+    return () => clearInterval(timer);
+  }, []);
+
+  const elapsed = progressInfo?.elapsedSeconds !== undefined ? progressInfo.elapsedSeconds : internalElapsed;
+  const activeMessage = progressInfo?.message || DEFAULT_MESSAGES[messageIndex];
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
@@ -44,7 +53,7 @@ export const StageProcessing: React.FC<StageProcessingProps> = ({
           Enhancing Image Quality...
         </h2>
         <p className="text-sm font-medium text-[#A3A3A3] transition-all duration-300">
-          {STATUS_MESSAGES[messageIndex]}
+          {activeMessage}
         </p>
       </div>
 
@@ -53,17 +62,26 @@ export const StageProcessing: React.FC<StageProcessingProps> = ({
         
         {/* Top Processing Bar */}
         <div className="bg-[#191919] border-b border-[#292929] px-5 py-3 flex items-center justify-between text-xs text-[#A3A3A3]">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-3">
             <Loader2 className="w-3.5 h-3.5 text-white animate-spin" />
             <span className="font-mono text-[11px] text-white">
-              Processing Request in Progress
+              {progressInfo?.stage === 'queued'
+                ? 'Job Queued in Backend'
+                : progressInfo?.stage === 'downloading'
+                ? 'Downloading Enhanced PNG'
+                : 'Real-ESRGAN Processing in Progress'}
             </span>
+            <div className="hidden sm:flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#242424] text-[10px] font-mono text-[#A3A3A3]">
+              <Clock className="w-3 h-3 text-[#A3A3A3]" />
+              <span>{elapsed}s elapsed</span>
+            </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            <span className="text-[11px] text-[#777777] font-mono hidden sm:inline">
-              Target: {metadata.width * 2} × {metadata.height * 2} px
-            </span>
+          <div className="flex items-center gap-3">
+            <div className="hidden md:flex items-center gap-1.5 text-[10px] text-[#777777] font-mono">
+              <ShieldCheck className="w-3 h-3 text-emerald-500/80" />
+              <span>Real-ESRGAN Engine Connected</span>
+            </div>
             {onCancel && (
               <button
                 onClick={onCancel}
@@ -99,6 +117,12 @@ export const StageProcessing: React.FC<StageProcessingProps> = ({
               <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
               <span>Scanning Structure & Edges</span>
             </div>
+
+            {/* Elapsed Timer Overlay */}
+            <div className="absolute bottom-3 right-3 bg-[#080808]/85 backdrop-blur-xs border border-[#383838] px-2.5 py-1 rounded text-[10px] font-mono text-[#A3A3A3] flex items-center gap-1.5 pointer-events-none">
+              <Clock className="w-3 h-3 text-white" />
+              <span>{elapsed}s</span>
+            </div>
           </div>
 
         </div>
@@ -106,12 +130,12 @@ export const StageProcessing: React.FC<StageProcessingProps> = ({
         {/* Bottom Status strip */}
         <div className="bg-[#141414] border-t border-[#292929] px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2 text-[#777777]">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#777777]" />
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
             <span>Server-side restoration pipeline active</span>
           </div>
 
           <div className="text-[11px] font-mono text-[#A3A3A3]">
-            {STATUS_MESSAGES[messageIndex]}
+            {activeMessage}
           </div>
         </div>
 

@@ -3,9 +3,15 @@ import { Menu, X, ArrowUpRight } from 'lucide-react';
 
 interface HeaderProps {
   onUploadClick: () => void;
+  onOpenBackendSettings?: () => void;
+  isBackendConnected?: boolean;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onUploadClick }) => {
+export const Header: React.FC<HeaderProps> = ({
+  onUploadClick,
+  onOpenBackendSettings,
+  isBackendConnected = false,
+}) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const scrollToSection = (id: string) => {
@@ -68,8 +74,19 @@ export const Header: React.FC<HeaderProps> = ({ onUploadClick }) => {
           </button>
         </nav>
 
-        {/* Zone 3: 1 Primary Action */}
+        {/* Zone 3: 1 Primary Action + Backend Indicator */}
         <div className="flex items-center gap-3 shrink-0">
+          {onOpenBackendSettings && (
+            <button
+              onClick={onOpenBackendSettings}
+              title="Configure Real-ESRGAN backend connection"
+              className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-[#161616] border border-[#333333] text-[11px] font-mono text-[#A3A3A3] hover:text-white hover:border-[#666666] transition-colors cursor-pointer"
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${isBackendConnected ? 'bg-white' : 'bg-[#666666]'}`} />
+              <span>Engine: {isBackendConnected ? 'Online' : 'Offline'}</span>
+            </button>
+          )}
+
           <button
             onClick={onUploadClick}
             className="hidden sm:inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-[#080808] bg-[#F2F2F2] rounded hover:bg-white active:bg-[#e0e0e0] transition-colors cursor-pointer whitespace-nowrap"

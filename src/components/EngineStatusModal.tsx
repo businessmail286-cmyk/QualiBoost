@@ -126,11 +126,15 @@ export const EngineStatusModal: React.FC<EngineStatusModalProps> = ({
               </div>
               <div className="flex items-center justify-between text-[#A3A3A3]">
                 <span className="text-[#777777]">Inference Endpoint:</span>
-                <span>{enhanceUrl}</span>
+                <span className="text-white">{enhanceUrl}</span>
+              </div>
+              <div className="flex items-center justify-between text-[#A3A3A3]">
+                <span className="text-[#777777]">Connection Type:</span>
+                <span>Temporary Cloudflare Tunnel (Google Colab)</span>
               </div>
               <div className="flex items-center justify-between text-[#A3A3A3]">
                 <span className="text-[#777777]">Supported Scales:</span>
-                <span className="text-white">2× and 4×</span>
+                <span className="text-white">2×, 3×, and 4×</span>
               </div>
             </div>
           </div>
@@ -139,12 +143,12 @@ export const EngineStatusModal: React.FC<EngineStatusModalProps> = ({
           <div className="space-y-2 text-xs">
             <div className="flex items-center gap-1.5 text-white font-medium">
               <Terminal className="w-3.5 h-3.5 text-[#A3A3A3]" />
-              <span>Starting the FastAPI Backend</span>
+              <span>Backend Connection Info</span>
             </div>
             <div className="bg-[#0a0a0a] border border-[#222222] rounded-lg p-3 font-mono text-[11px] text-[#A3A3A3] space-y-1">
-              <p className="text-[#777777]"># Run in backend directory:</p>
-              <p className="text-white">pip install -r requirements.txt</p>
-              <p className="text-white">uvicorn main:app --host 0.0.0.0 --port 8000</p>
+              <p className="text-[#777777]"># Active Tunnel Target:</p>
+              <p className="text-white">https://gravity-kid-starts-queen.trycloudflare.com/api/jobs/enhance</p>
+              <p className="text-[#777777] mt-1"># Running in Google Colab session through Cloudflare tunnel</p>
             </div>
           </div>
 

@@ -1,0 +1,139 @@
+From f28edc415b7ee7ef915f8fb9b7a1b077de9caa86 Mon Sep 17 00:00:00 2001
+From: businessmail286 <businessmail286@gmail.com>
+Date: Sun, 1 Nov 2026 17:10:54 +0000
+Subject: [PATCH 4/4] fix(torchvision): register functional_tensor shim before
+ BasicSR imports across inference scripts
+
+---
+ cog_predict.py                | 10 +++++++++-
+ inference_realesrgan.py       | 20 +++++++-------------
+ inference_realesrgan_video.py | 20 +++++++-------------
+ qualiboost_backend/app.py     | 20 +++++++-------------
+ 4 files changed, 30 insertions(+), 40 deletions(-)
+
+diff --git a/cog_predict.py b/cog_predict.py
+index fa0f89d..db7e820 100644
+--- a/cog_predict.py
++++ b/cog_predict.py
+@@ -11,7 +11,15 @@ os.system('python setup.py develop')
+ import cv2
+ import shutil
+ import tempfile
+-import torch
++import sys
++import torchvision.transforms.functional as tv_functional
++
++if not hasattr(tv_functional, "rgb_to_grayscale"):
++    raise AttributeError("torchvision.transforms.functional does not provide rgb_to_grayscale")
++
++sys.modules.setdefault("torchvision.transforms.functional_tensor", tv_functional)
++sys.modules["torchvision.transforms.functional_tensor"] = tv_functional
++
+ from basicsr.archs.rrdbnet_arch import RRDBNet
+ from basicsr.archs.srvgg_arch import SRVGGNetCompact
+ 
+diff --git a/inference_realesrgan.py b/inference_realesrgan.py
+index f3bd94b..c67858d 100644
+--- a/inference_realesrgan.py
++++ b/inference_realesrgan.py
+@@ -2,22 +2,16 @@
+ # TorchVision / BasicSR compatibility shim
+ # In torchvision >= 0.15, torchvision.transforms.functional_tensor was removed.
+ # BasicSR 1.4.2 imports rgb_to_grayscale from torchvision.transforms.functional_tensor.
+-# This shim safely registers functional_tensor into sys.modules using
+-# torchvision.transforms.functional and verifies rgb_to_grayscale exists.
++# Register torchvision.transforms.functional as functional_tensor in sys.modules.
+ # -------------------------------------------------------------------------
+ import sys
++import torchvision.transforms.functional as tv_functional
+ 
+-try:
+-    import torchvision.transforms.functional_tensor  # noqa: F401
+-except ImportError:
+-    try:
+-        import torchvision.transforms.functional as tv_functional
+-        if not hasattr(tv_functional, "rgb_to_grayscale"):
+-            raise AttributeError("torchvision.transforms.functional does not provide rgb_to_grayscale")
+-        sys.modules.setdefault("torchvision.transforms.functional_tensor", tv_functional)
+-        sys.modules["torchvision.transforms.functional_tensor"] = tv_functional
+-    except Exception as _shim_err:
+-        pass
++if not hasattr(tv_functional, "rgb_to_grayscale"):
++    raise AttributeError("torchvision.transforms.functional does not provide rgb_to_grayscale")
++
++sys.modules.setdefault("torchvision.transforms.functional_tensor", tv_functional)
++sys.modules["torchvision.transforms.functional_tensor"] = tv_functional
+ 
+ import argparse
+ import cv2
+diff --git a/inference_realesrgan_video.py b/inference_realesrgan_video.py
+index e3cd5b4..2af835b 100644
+--- a/inference_realesrgan_video.py
++++ b/inference_realesrgan_video.py
+@@ -2,22 +2,16 @@
+ # TorchVision / BasicSR compatibility shim
+ # In torchvision >= 0.15, torchvision.transforms.functional_tensor was removed.
+ # BasicSR 1.4.2 imports rgb_to_grayscale from torchvision.transforms.functional_tensor.
+-# This shim safely registers functional_tensor into sys.modules using
+-# torchvision.transforms.functional and verifies rgb_to_grayscale exists.
++# Register torchvision.transforms.functional as functional_tensor in sys.modules.
+ # -------------------------------------------------------------------------
+ import sys
++import torchvision.transforms.functional as tv_functional
+ 
+-try:
+-    import torchvision.transforms.functional_tensor  # noqa: F401
+-except ImportError:
+-    try:
+-        import torchvision.transforms.functional as tv_functional
+-        if not hasattr(tv_functional, "rgb_to_grayscale"):
+-            raise AttributeError("torchvision.transforms.functional does not provide rgb_to_grayscale")
+-        sys.modules.setdefault("torchvision.transforms.functional_tensor", tv_functional)
+-        sys.modules["torchvision.transforms.functional_tensor"] = tv_functional
+-    except Exception as _shim_err:
+-        pass
++if not hasattr(tv_functional, "rgb_to_grayscale"):
++    raise AttributeError("torchvision.transforms.functional does not provide rgb_to_grayscale")
++
++sys.modules.setdefault("torchvision.transforms.functional_tensor", tv_functional)
++sys.modules["torchvision.transforms.functional_tensor"] = tv_functional
+ 
+ import argparse
+ import cv2
+diff --git a/qualiboost_backend/app.py b/qualiboost_backend/app.py
+index 68a7ee6..1b7bcb3 100644
+--- a/qualiboost_backend/app.py
++++ b/qualiboost_backend/app.py
+@@ -2,22 +2,16 @@
+ # TorchVision / BasicSR compatibility shim
+ # In torchvision >= 0.15, torchvision.transforms.functional_tensor was removed.
+ # BasicSR 1.4.2 imports rgb_to_grayscale from torchvision.transforms.functional_tensor.
+-# This shim safely registers functional_tensor into sys.modules using
+-# torchvision.transforms.functional and verifies rgb_to_grayscale exists.
++# Register torchvision.transforms.functional as functional_tensor in sys.modules.
+ # -------------------------------------------------------------------------
+ import sys
++import torchvision.transforms.functional as tv_functional
+ 
+-try:
+-    import torchvision.transforms.functional_tensor  # noqa: F401
+-except ImportError:
+-    try:
+-        import torchvision.transforms.functional as tv_functional
+-        if not hasattr(tv_functional, "rgb_to_grayscale"):
+-            raise AttributeError("torchvision.transforms.functional does not provide rgb_to_grayscale")
+-        sys.modules.setdefault("torchvision.transforms.functional_tensor", tv_functional)
+-        sys.modules["torchvision.transforms.functional_tensor"] = tv_functional
+-    except Exception as _shim_err:
+-        pass
++if not hasattr(tv_functional, "rgb_to_grayscale"):
++    raise AttributeError("torchvision.transforms.functional does not provide rgb_to_grayscale")
++
++sys.modules.setdefault("torchvision.transforms.functional_tensor", tv_functional)
++sys.modules["torchvision.transforms.functional_tensor"] = tv_functional
+ 
+ import os
+ import uuid
+-- 
+2.34.1
+
