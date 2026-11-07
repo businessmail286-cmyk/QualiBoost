@@ -41,7 +41,7 @@ function getTargetUrl(): string {
   if (process.env.VITE_QUALIBOOST_API_URL?.trim()) {
     return sanitizeTargetUrl(process.env.VITE_QUALIBOOST_API_URL.trim());
   }
-  return 'https://gravity-kid-starts-queen.trycloudflare.com';
+  return 'https://packages-separately-send-mobiles.trycloudflare.com';
 }
 
 function qualiboostProxyPlugin(): Plugin {

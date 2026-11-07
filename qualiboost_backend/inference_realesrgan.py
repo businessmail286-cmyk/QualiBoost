@@ -100,6 +100,7 @@ def main():
         ]
 
     # determine model paths
+    print("PROGRESS:25:Loading model weights", flush=True)
     if args.model_path is not None:
         model_path = args.model_path
     else:
@@ -119,6 +120,7 @@ def main():
         dni_weight = [args.denoise_strength, 1 - args.denoise_strength]
 
     # restorer
+    print("PROGRESS:45:Initializing RealESRGANer pipeline", flush=True)
     upsampler = RealESRGANer(
         scale=netscale,
         model_path=model_path,
@@ -147,7 +149,8 @@ def main():
 
     for idx, path in enumerate(paths):
         imgname, extension = os.path.splitext(os.path.basename(path))
-        print('Testing', idx, imgname)
+        print('Testing', idx, imgname, flush=True)
+        print("PROGRESS:55:Decoding input image into tensors", flush=True)
 
         img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
         if len(img.shape) == 3 and img.shape[2] == 4:
@@ -155,26 +158,47 @@ def main():
         else:
             img_mode = None
 
+        print("PROGRESS:65:Running Real-ESRGAN neural inference", flush=True)
+        import threading
+        stop_event = threading.Event()
+
+        def _heartbeat():
+            milestones = [72, 76, 80, 84, 88]
+            idx_m = 0
+            while not stop_event.wait(timeout=1.2):
+                if idx_m < len(milestones):
+                    print(f"PROGRESS:{milestones[idx_m]}:Neural feature reconstruction active", flush=True)
+                    idx_m += 1
+
+        hb = threading.Thread(target=_heartbeat, daemon=True)
+        hb.start()
+
         try:
             if args.face_enhance:
                 _, _, output = face_enhancer.enhance(img, has_aligned=False, only_center_face=False, paste_back=True)
             else:
                 output, _ = upsampler.enhance(img, outscale=args.outscale)
         except RuntimeError as error:
-            print('Error', error)
-            print('If you encounter CUDA out of memory, try to set --tile with a smaller number.')
+            print('Error', error, flush=True)
+            print('If you encounter CUDA out of memory, try to set --tile with a smaller number.', flush=True)
+            raise
+        finally:
+            stop_event.set()
+
+        print("PROGRESS:92:Inference complete, encoding output", flush=True)
+        if args.ext == 'auto':
+            extension = extension[1:]
         else:
-            if args.ext == 'auto':
-                extension = extension[1:]
-            else:
-                extension = args.ext
-            if img_mode == 'RGBA':  # RGBA images should be saved in png format
-                extension = 'png'
-            if args.suffix == '':
-                save_path = os.path.join(args.output, f'{imgname}.{extension}')
-            else:
-                save_path = os.path.join(args.output, f'{imgname}_{args.suffix}.{extension}')
-            cv2.imwrite(save_path, output)
+            extension = args.ext
+        if img_mode == 'RGBA':  # RGBA images should be saved in png format
+            extension = 'png'
+        if args.suffix == '':
+            save_path = os.path.join(args.output, f'{imgname}.{extension}')
+        else:
+            save_path = os.path.join(args.output, f'{imgname}_{args.suffix}.{extension}')
+        print("PROGRESS:96:Saving enhanced image output", flush=True)
+        cv2.imwrite(save_path, output)
+        print("PROGRESS:100:Complete", flush=True)
 
 
 if __name__ == '__main__':

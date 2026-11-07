@@ -1,12 +1,14 @@
 import React from 'react';
-import { ArrowRight, RefreshCw, Trash2, Maximize2, HardDrive, FileType, Server } from 'lucide-react';
-import { ImageMetadata } from '../../types';
+import { ArrowRight, RefreshCw, Trash2, Maximize2, HardDrive, FileType, Server, Sliders, Sparkles } from 'lucide-react';
+import { ImageMetadata, ProcessingStudioMode } from '../../types';
 import { BackendHealthStatus } from '../../config/api';
 
 interface StageReadyProps {
   metadata: ImageMetadata;
   selectedScale: 2 | 3 | 4;
   onScaleChange: (scale: 2 | 3 | 4) => void;
+  selectedMode?: ProcessingStudioMode;
+  onModeChange?: (mode: ProcessingStudioMode) => void;
   onUpscaleClick: () => void;
   onReplaceClick: () => void;
   onRemoveClick: () => void;
@@ -20,6 +22,8 @@ export const StageReady: React.FC<StageReadyProps> = ({
   metadata,
   selectedScale,
   onScaleChange,
+  selectedMode = 'standard',
+  onModeChange,
   onUpscaleClick,
   onReplaceClick,
   onRemoveClick,
@@ -42,8 +46,9 @@ export const StageReady: React.FC<StageReadyProps> = ({
     ? 'WebP'
     : 'JPEG';
 
-  const targetWidth = metadata.width * selectedScale;
-  const targetHeight = metadata.height * selectedScale;
+  const effectiveScale = selectedMode === 'studio' ? 4 : selectedScale;
+  const targetWidth = metadata.width * effectiveScale;
+  const targetHeight = metadata.height * effectiveScale;
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
@@ -113,6 +118,83 @@ export const StageReady: React.FC<StageReadyProps> = ({
           />
         </div>
 
+        {/* Processing Mode Selector: Standard Mode vs Studio Mode */}
+        <div className="bg-[#161616] border-t border-[#292929] px-5 sm:px-6 py-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-white">
+              Processing Mode
+            </span>
+            <span className="text-[11px] font-mono text-[#A3A3A3]">
+              {selectedMode === 'studio'
+                ? 'Studio Mode · 4× Real-ESRGAN + GFPGAN Face Restoration'
+                : 'Standard Mode · Real-ESRGAN Enhancement'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Standard Mode Card */}
+            <button
+              type="button"
+              onClick={() => onModeChange?.('standard')}
+              disabled={isSubmitting}
+              className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 ${
+                selectedMode === 'standard'
+                  ? 'bg-[#222222] border-white text-white shadow-md ring-1 ring-white/20'
+                  : 'bg-[#121212] border-[#2c2c2c] text-[#888888] hover:text-[#d1d1d1] hover:border-[#444444]'
+              }`}
+            >
+              <div className="flex items-center justify-between w-full">
+                <div className="flex items-center gap-2">
+                  <Sliders className={`w-4 h-4 ${selectedMode === 'standard' ? 'text-white' : 'text-[#777777]'}`} />
+                  <span className="text-xs font-bold tracking-tight text-white uppercase">Standard Mode</span>
+                </div>
+                {selectedMode === 'standard' && (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-white text-black font-semibold">
+                    Default
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-[#999999] leading-relaxed">
+                Existing Real-ESRGAN enhancement and sharpening with flexible 2×, 3×, or 4× scaling.
+              </p>
+            </button>
+
+            {/* Studio Mode Card */}
+            <button
+              type="button"
+              onClick={() => {
+                onModeChange?.('studio');
+                onScaleChange(4);
+              }}
+              disabled={isSubmitting}
+              className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between gap-2 ${
+                selectedMode === 'studio'
+                  ? 'bg-[#222222] border-white text-white shadow-md ring-1 ring-white/20'
+                  : 'bg-[#121212] border-[#2c2c2c] text-[#888888] hover:text-[#d1d1d1] hover:border-[#444444]'
+              }`}
+            >
+              <div className="flex items-center justify-between w-full">
+                <div className="flex items-center gap-2">
+                  <Sparkles className={`w-4 h-4 ${selectedMode === 'studio' ? 'text-white' : 'text-[#777777]'}`} />
+                  <span className="text-xs font-bold tracking-tight text-white uppercase">Studio Mode</span>
+                </div>
+                {selectedMode === 'studio' ? (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-white text-black font-semibold">
+                    Active
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-[#222222] border border-[#383838] text-[#A3A3A3]">
+                    GFPGAN Faces
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-[#999999] leading-relaxed">
+                4× Real-ESRGAN upscaling, GFPGAN facial restoration when faces are detected, and professional studio finishing.
+              </p>
+            </button>
+          </div>
+        </div>
+
         {/* Configuration Bar: Scale Selection + Target Readout + Connectivity */}
         <div className="bg-[#141414] border-t border-[#292929] p-5 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-5">
           
@@ -127,10 +209,15 @@ export const StageReady: React.FC<StageReadyProps> = ({
                   <button
                     key={sc}
                     type="button"
-                    onClick={() => onScaleChange(sc)}
+                    onClick={() => {
+                      onScaleChange(sc);
+                      if (sc !== 4 && selectedMode === 'studio') {
+                        onModeChange?.('standard');
+                      }
+                    }}
                     disabled={isSubmitting}
                     className={`px-3 py-1 text-xs font-semibold rounded transition-colors cursor-pointer ${
-                      selectedScale === sc
+                      effectiveScale === sc
                         ? 'bg-white text-[#080808] shadow-xs'
                         : 'text-[#A3A3A3] hover:text-white'
                     }`}
@@ -151,7 +238,7 @@ export const StageReady: React.FC<StageReadyProps> = ({
               </span>
               <span>·</span>
               <span className="font-mono text-[11px] text-[#A3A3A3]">
-                {selectedScale}× Enhanced Detail
+                {effectiveScale}× {selectedMode === 'studio' ? 'Studio Mode (GFPGAN Faces)' : 'Enhanced Detail'}
               </span>
             </div>
 

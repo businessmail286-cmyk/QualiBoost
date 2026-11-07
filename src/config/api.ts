@@ -11,7 +11,7 @@ export interface BackendHealthStatus {
   checkedAt?: Date;
 }
 
-export const DEFAULT_PRODUCTION_API_URL = 'https://gravity-kid-starts-queen.trycloudflare.com';
+export const DEFAULT_PRODUCTION_API_URL = 'https://packages-separately-send-mobiles.trycloudflare.com';
 
 /**
  * Normalizes and sanitizes a backend base URL:
@@ -109,7 +109,7 @@ export const API_CONFIG = {
         if (stored !== null && stored.trim() !== '') {
           const sanitized = sanitizeBaseUrl(stored);
           // If stored URL was previous render or previous temporary tunnel, ignore it so it falls back to active tunnel
-          const staleKeywords = ['onrender.com', 'understood-centers-level-thee'];
+          const staleKeywords = ['onrender.com', 'understood-centers-level-thee', 'gravity-kid-starts-queen'];
           if (sanitized && !staleKeywords.some((k) => sanitized.includes(k))) {
             return sanitized;
           }
@@ -120,8 +120,8 @@ export const API_CONFIG = {
     }
 
     const envUrl = (
-      (import.meta.env.VITE_API_BASE_URL as string | undefined) ||
-      (import.meta.env.VITE_QUALIBOOST_API_URL as string | undefined)
+      (import.meta.env.VITE_QUALIBOOST_API_URL as string | undefined) ||
+      (import.meta.env.VITE_API_BASE_URL as string | undefined)
     )?.trim();
     if (envUrl) {
       const sanitized = sanitizeBaseUrl(envUrl);
@@ -182,14 +182,11 @@ export async function checkBackendHealth(
   const directUrl = overrideUrl ? API_CONFIG.getHealthUrl(overrideUrl) : API_CONFIG.getHealthUrl();
   const urlsToTry: string[] = [];
 
-  // If an external backend URL is configured, check it directly
-  if (directUrl && directUrl.startsWith('http')) {
+  // Always try relative same-origin proxy first (/health) to avoid cross-origin CORS blocks
+  // in hosted environments (e.g. Google Cloud Run preview). The proxy sets Origin: http://localhost:3000.
+  urlsToTry.push('/health');
+  if (directUrl && directUrl.startsWith('http') && directUrl !== '/health') {
     urlsToTry.push(directUrl);
-  } else {
-    urlsToTry.push('/health');
-    if (directUrl && directUrl !== '/health') {
-      urlsToTry.push(directUrl);
-    }
   }
 
   let lastError = 'Connection failed';
@@ -293,6 +290,8 @@ export async function checkBackendHealth(
       if (err instanceof Error) {
         if (err.name === 'AbortError') {
           lastError = `Request timed out after ${timeoutMs}ms`;
+        } else if (err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError')) {
+          lastError = `CORS or network error reaching ${url}. Browser blocked access because the FastAPI backend does not allow origin ${window.location.origin} (CORS disallowed) or the tunnel is down.`;
         } else {
           lastError = err.message || 'Network unreachable';
         }

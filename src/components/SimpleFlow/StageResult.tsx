@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Download, RefreshCw, Maximize2, CheckCircle2, Columns } from 'lucide-react';
+import { Download, RefreshCw, Maximize2, CheckCircle2, Columns, Loader2, AlertCircle } from 'lucide-react';
 import { ImageMetadata, UpscaleResult } from '../../types';
+import { downloadJobResultBlob } from '../../services/upscaleService';
 
 interface StageResultProps {
   metadata: ImageMetadata;
@@ -15,7 +16,8 @@ export const StageResult: React.FC<StageResultProps> = ({
 }) => {
   const [sliderPosition, setSliderPosition] = useState<number>(50);
   const [viewMode, setViewMode] = useState<'compare' | 'enhanced'>('compare');
-  const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [downloadingFormat, setDownloadingFormat] = useState<'png' | 'jpeg' | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isDragging = useRef<boolean>(false);
 
@@ -49,65 +51,66 @@ export const StageResult: React.FC<StageResultProps> = ({
   };
 
   /**
-   * Genuine browser image decoding and encoding for PNG / JPEG downloads.
-   * Conforms to Rule 8:
-   * - If PNG requested and blob is already image/png, downloads directly without quality loss.
-   * - If JPEG requested or conversion needed, renders into canvas and encodes with canvas.toBlob().
-   * - Releases temporary object URLs.
+   * Retrieves and triggers download of authentic image blobs in PNG or JPEG format.
+   * - Uses existing backend job ID to call GET /api/jobs/{job_id}/result (PNG) or
+   *   GET /api/jobs/{job_id}/result?format=jpeg (JPEG, quality 95).
+   * - Sets appropriate filenames (.png or .jpg).
+   * - Prevents duplicate downloads while in progress.
+   * - Displays loading indicator and error feedback on failure.
    */
   const handleDownloadFormat = async (targetFormat: 'png' | 'jpeg') => {
-    if (isExporting) return;
-    setIsExporting(true);
+    if (downloadingFormat) return;
+    setDownloadingFormat(targetFormat);
+    setDownloadError(null);
 
+    const baseName = metadata.name ? metadata.name.replace(/\.[^/.]+$/, '') : 'qualiboost';
     const downloadFilename = targetFormat === 'png'
-      ? (result.filename || 'qualiboost-enhanced.png')
-      : 'qualiboost-enhanced.jpg';
+      ? `${baseName}-enhanced.png`
+      : `${baseName}-enhanced.jpg`;
 
     try {
-      // If user requested PNG and the backend already returned a PNG blob, download directly
-      if (targetFormat === 'png' && result.blob && result.format.includes('png')) {
-        const directUrl = URL.createObjectURL(result.blob);
-        const link = document.createElement('a');
-        link.href = directUrl;
-        link.download = downloadFilename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        setTimeout(() => URL.revokeObjectURL(directUrl), 2000);
-        return;
+      let blob: Blob;
+
+      if (result.jobId) {
+        // Fetch from backend using completed job ID and selected format
+        blob = await downloadJobResultBlob(result.jobId, targetFormat, result.blob);
+      } else if (targetFormat === 'png' && result.blob) {
+        // Direct PNG blob already in memory
+        blob = result.blob;
+      } else {
+        // Fallback for preset images or direct non-job API responses
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = () => reject(new Error('Failed to decode enhanced image for export.'));
+          img.src = result.enhancedUrl;
+        });
+
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || result.outputWidth;
+        canvas.height = img.naturalHeight || result.outputHeight;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Canvas 2D context unavailable.');
+
+        if (targetFormat === 'jpeg') {
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        ctx.drawImage(img, 0, 0);
+
+        const mimeType = targetFormat === 'png' ? 'image/png' : 'image/jpeg';
+        const quality = targetFormat === 'jpeg' ? 0.95 : undefined;
+
+        const canvasBlob = await new Promise<Blob | null>((resolve) => {
+          canvas.toBlob((b) => resolve(b), mimeType, quality);
+        });
+
+        if (!canvasBlob) throw new Error(`Browser failed to encode image as ${targetFormat.toUpperCase()}.`);
+        blob = canvasBlob;
       }
 
-      // If user requested JPEG or format conversion is necessary, use canvas.toBlob
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = () => reject(new Error('Failed to decode enhanced image for export.'));
-        img.src = result.enhancedUrl;
-      });
-
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth || result.outputWidth;
-      canvas.height = img.naturalHeight || result.outputHeight;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Canvas 2D context unavailable.');
-
-      // If JPEG, fill white background in case of alpha transparency
-      if (targetFormat === 'jpeg') {
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-      }
-      ctx.drawImage(img, 0, 0);
-
-      const mimeType = targetFormat === 'png' ? 'image/png' : 'image/jpeg';
-      const quality = targetFormat === 'jpeg' ? 0.95 : undefined;
-
-      const blob = await new Promise<Blob | null>((resolve) => {
-        canvas.toBlob((b) => resolve(b), mimeType, quality);
-      });
-
-      if (!blob) throw new Error(`Browser failed to encode image as ${targetFormat.toUpperCase()}.`);
-
+      // Trigger authentic browser download
       const downloadUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = downloadUrl;
@@ -118,15 +121,10 @@ export const StageResult: React.FC<StageResultProps> = ({
       setTimeout(() => URL.revokeObjectURL(downloadUrl), 2000);
     } catch (err) {
       console.error('Download export failed:', err);
-      // Fallback to original enhanced url download
-      const link = document.createElement('a');
-      link.href = result.enhancedUrl;
-      link.download = downloadFilename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      const errMsg = err instanceof Error ? err.message : 'Download failed. Please try again.';
+      setDownloadError(`Failed to download ${targetFormat.toUpperCase()}: ${errMsg}`);
     } finally {
-      setIsExporting(false);
+      setDownloadingFormat(null);
     }
   };
 
@@ -163,6 +161,11 @@ export const StageResult: React.FC<StageResultProps> = ({
             {result.scale && (
               <span className="font-mono text-[10px] text-[#A3A3A3] bg-[#222222] border border-[#383838] px-1.5 py-0.5 rounded">
                 {result.scale}× Scale
+              </span>
+            )}
+            {result.studioMode === 'studio' && (
+              <span className="font-mono text-[10px] text-white bg-[#222222] border border-[#555555] px-1.5 py-0.5 rounded">
+                Studio Mode (GFPGAN Faces)
               </span>
             )}
           </div>
@@ -264,6 +267,22 @@ export const StageResult: React.FC<StageResultProps> = ({
           )}
         </div>
 
+        {/* Error notification banner if download fails */}
+        {downloadError && (
+          <div className="bg-[#1f1212] border-t border-[#5c2424] px-5 py-3 flex items-center justify-between gap-3 text-xs text-[#fca5a5]">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-[#f87171]" />
+              <span>{downloadError}</span>
+            </div>
+            <button
+              onClick={() => setDownloadError(null)}
+              className="text-[#A3A3A3] hover:text-white underline cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {/* Bottom Actions Bar with Genuine PNG & JPEG Downloads */}
         <div className="bg-[#141414] border-t border-[#292929] p-5 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
           
@@ -275,26 +294,50 @@ export const StageResult: React.FC<StageResultProps> = ({
             <span>Upscale Another Image</span>
           </button>
 
-          {/* Genuine PNG & JPEG Download Buttons */}
-          <div className="flex items-center gap-2.5 w-full sm:w-auto">
+          {/* Download Options: PNG (Maximum preservation) and JPEG (Quality 95) */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto">
+            {/* Download PNG — maximum preservation */}
             <button
               onClick={() => handleDownloadFormat('png')}
-              disabled={isExporting}
-              className="flex-1 sm:flex-initial px-6 py-3.5 text-xs font-semibold uppercase tracking-wider text-[#080808] bg-[#F2F2F2] rounded-lg hover:bg-white active:bg-[#e0e0e0] transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
-              title="Download uncompressed PNG"
+              disabled={Boolean(downloadingFormat)}
+              className="px-5 py-2.5 text-xs font-semibold text-[#080808] bg-[#F2F2F2] rounded-lg hover:bg-white active:bg-[#e0e0e0] transition-all flex items-center justify-center gap-2.5 cursor-pointer shadow-md disabled:opacity-50 disabled:cursor-not-allowed group text-left"
+              title="Download PNG — maximum preservation"
             >
-              <Download className="w-4 h-4" />
-              <span>Download PNG</span>
+              {downloadingFormat === 'png' ? (
+                <Loader2 className="w-4 h-4 animate-spin text-[#080808] shrink-0" />
+              ) : (
+                <Download className="w-4 h-4 text-[#080808] shrink-0" />
+              )}
+              <div className="flex flex-col items-start leading-tight">
+                <span className="uppercase tracking-wider font-bold">
+                  {downloadingFormat === 'png' ? 'Preparing PNG...' : 'Download PNG'}
+                </span>
+                <span className="text-[10px] text-[#555555] font-normal font-sans">
+                  Maximum preservation
+                </span>
+              </div>
             </button>
 
+            {/* Download JPEG — high-quality JPEG, quality 95 */}
             <button
               onClick={() => handleDownloadFormat('jpeg')}
-              disabled={isExporting}
-              className="flex-1 sm:flex-initial px-5 py-3.5 text-xs font-semibold uppercase tracking-wider text-white bg-[#222222] border border-[#383838] rounded-lg hover:bg-[#292929] hover:border-[#777777] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-              title="Download high-quality JPEG (95% quality)"
+              disabled={Boolean(downloadingFormat)}
+              className="px-5 py-2.5 text-xs font-semibold text-white bg-[#222222] border border-[#383838] rounded-lg hover:bg-[#292929] hover:border-[#777777] transition-all flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed group text-left"
+              title="Download JPEG — high-quality JPEG, quality 95"
             >
-              <Download className="w-4 h-4 text-[#A3A3A3]" />
-              <span>Download JPEG</span>
+              {downloadingFormat === 'jpeg' ? (
+                <Loader2 className="w-4 h-4 animate-spin text-white shrink-0" />
+              ) : (
+                <Download className="w-4 h-4 text-[#A3A3A3] group-hover:text-white shrink-0" />
+              )}
+              <div className="flex flex-col items-start leading-tight">
+                <span className="uppercase tracking-wider font-bold">
+                  {downloadingFormat === 'jpeg' ? 'Preparing JPEG...' : 'Download JPEG'}
+                </span>
+                <span className="text-[10px] text-[#888888] font-normal font-sans">
+                  Quality 95
+                </span>
+              </div>
             </button>
           </div>
 

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Download, RefreshCw, CheckCircle2, Maximize2 } from 'lucide-react';
+import { Download, RefreshCw, CheckCircle2, Maximize2, Loader2 } from 'lucide-react';
 import { ImageMetadata, EnhancementSettings, UpscaleResult } from '../../types';
+import { downloadJobResultBlob } from '../../services/upscaleService';
 
 interface ResultAreaProps {
   metadata: ImageMetadata;
@@ -34,6 +35,19 @@ export const ResultArea: React.FC<ResultAreaProps> = ({
     const downloadFilename = `${safeBaseName}-upscaled${scaleSuffix}.${format === 'png' ? 'png' : 'jpg'}`;
 
     try {
+      if (result.jobId) {
+        const blob = await downloadJobResultBlob(result.jobId, format, result.blob);
+        const downloadUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = downloadFilename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(downloadUrl), 2000);
+        return;
+      }
+
       if (format === 'png' && result.blob && result.format.includes('png')) {
         const directUrl = URL.createObjectURL(result.blob);
         const link = document.createElement('a');

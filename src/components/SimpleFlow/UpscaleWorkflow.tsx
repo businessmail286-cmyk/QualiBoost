@@ -4,7 +4,7 @@ import { StageReady } from './StageReady';
 import { StageProcessing } from './StageProcessing';
 import { StageResult } from './StageResult';
 import { StageError } from './StageError';
-import { FlowStage, ImageMetadata, PresetImage, UpscaleResult, ScaleValue } from '../../types';
+import { FlowStage, ImageMetadata, PresetImage, UpscaleResult, ScaleValue, ProcessingStudioMode } from '../../types';
 import { requestImageUpscale, UpscaleProgressInfo } from '../../services/upscaleService';
 import { checkBackendHealth, BackendHealthStatus } from '../../config/api';
 
@@ -24,6 +24,7 @@ export const UpscaleWorkflow: React.FC<UpscaleWorkflowProps> = ({
   const [stage, setStage] = useState<FlowStage>('upload');
   const [metadata, setMetadata] = useState<ImageMetadata | null>(null);
   const [selectedScale, setSelectedScale] = useState<ScaleValue>(4);
+  const [selectedMode, setSelectedMode] = useState<ProcessingStudioMode>('standard');
   const [selectedModel, setSelectedModel] = useState<string>('RealESRGAN_x4plus');
   const [result, setResult] = useState<UpscaleResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>('');
@@ -167,18 +168,37 @@ export const UpscaleWorkflow: React.FC<UpscaleWorkflowProps> = ({
     abortControllerRef.current = new AbortController();
 
     try {
+      // 14. Check the backend health before submitting an enhancement
+      const health = await checkBackendHealth();
+      setHealthStatus(health);
+      onHealthChange?.(health.connected);
+      if (!health.connected) {
+        throw new Error(
+          health.errorMessage ||
+            'Real-ESRGAN backend is currently offline or unreachable. Please verify that the tunnel is running.'
+        );
+      }
+
+      const effectiveScale = selectedMode === 'studio' ? 4 : (selectedScale || 4);
       const res = await requestImageUpscale(
         metadata,
-        selectedScale,
-        selectedModel,
+        effectiveScale,
+        selectedModel || 'RealESRGAN_x4plus',
         abortControllerRef.current.signal,
         (info) => {
           setProgressInfo(info);
-        }
+        },
+        70,
+        selectedMode
       );
       setResult(res);
       setStage('result');
-      onToast(`Real-ESRGAN ${selectedScale}× inference completed!`, 'success');
+      onToast(
+        selectedMode === 'studio'
+          ? 'Studio Mode inference completed (4× Real-ESRGAN + GFPGAN Face Restoration)!'
+          : `Real-ESRGAN ${selectedScale}× inference completed!`,
+        'success'
+      );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'An unexpected processing error occurred.';
       setErrorMessage(msg);
@@ -224,6 +244,8 @@ export const UpscaleWorkflow: React.FC<UpscaleWorkflowProps> = ({
             metadata={metadata}
             selectedScale={selectedScale}
             onScaleChange={setSelectedScale}
+            selectedMode={selectedMode}
+            onModeChange={setSelectedMode}
             onUpscaleClick={handleStartUpscaling}
             onReplaceClick={() => hiddenFileInputRef.current?.click()}
             onRemoveClick={handleRemove}
@@ -240,6 +262,7 @@ export const UpscaleWorkflow: React.FC<UpscaleWorkflowProps> = ({
             metadata={metadata}
             onCancel={handleCancelProcessing}
             progressInfo={progressInfo}
+            selectedMode={selectedMode}
           />
         )}
 

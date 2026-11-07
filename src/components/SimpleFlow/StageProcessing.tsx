@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, X, Clock, ShieldCheck } from 'lucide-react';
-import { ImageMetadata } from '../../types';
+import { Loader2, X, ShieldCheck, Sparkles } from 'lucide-react';
+import { ImageMetadata, ProcessingStudioMode } from '../../types';
 import { UpscaleProgressInfo } from '../../services/upscaleService';
 
 interface StageProcessingProps {
   metadata: ImageMetadata;
   onCancel?: () => void;
   progressInfo?: UpscaleProgressInfo | null;
+  selectedMode?: ProcessingStudioMode;
 }
 
 const DEFAULT_MESSAGES = [
@@ -17,32 +18,37 @@ const DEFAULT_MESSAGES = [
   'Finalizing enhanced PNG output bytes...',
 ];
 
+const STUDIO_MESSAGES = [
+  'Submitting image to Studio Mode backend...',
+  'Detecting facial landmarks with GFPGAN...',
+  'Executing 4× Real-ESRGAN neural upscaling...',
+  'Restoring facial features and natural micro-textures...',
+  'Finalizing professional studio output bytes...',
+];
+
 export const StageProcessing: React.FC<StageProcessingProps> = ({
   metadata,
   onCancel,
   progressInfo,
+  selectedMode = 'standard',
 }) => {
   const [messageIndex, setMessageIndex] = useState(0);
-  const [internalElapsed, setInternalElapsed] = useState(0);
 
-  // Live timer tick
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setInternalElapsed((prev) => prev + 1);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
+  const activeMessageList = selectedMode === 'studio' ? STUDIO_MESSAGES : DEFAULT_MESSAGES;
 
   // Transition through status messages
   useEffect(() => {
     const timer = setInterval(() => {
-      setMessageIndex((prev) => (prev < DEFAULT_MESSAGES.length - 1 ? prev + 1 : prev));
+      setMessageIndex((prev) => (prev < activeMessageList.length - 1 ? prev + 1 : prev));
     }, 4500);
     return () => clearInterval(timer);
-  }, []);
+  }, [activeMessageList.length]);
 
-  const elapsed = progressInfo?.elapsedSeconds !== undefined ? progressInfo.elapsedSeconds : internalElapsed;
-  const activeMessage = progressInfo?.message || DEFAULT_MESSAGES[messageIndex];
+  const displayPercent = Math.min(
+    100,
+    Math.max(0, Math.round(progressInfo?.progressPercent ?? (progressInfo?.stage === 'completed' ? 100 : 0)))
+  );
+  const activeMessage = progressInfo?.message || activeMessageList[messageIndex];
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
@@ -69,18 +75,20 @@ export const StageProcessing: React.FC<StageProcessingProps> = ({
                 ? 'Job Queued in Backend'
                 : progressInfo?.stage === 'downloading'
                 ? 'Downloading Enhanced PNG'
+                : selectedMode === 'studio'
+                ? 'Studio Mode Processing (Real-ESRGAN + GFPGAN)'
                 : 'Real-ESRGAN Processing in Progress'}
             </span>
-            <div className="hidden sm:flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#242424] text-[10px] font-mono text-[#A3A3A3]">
-              <Clock className="w-3 h-3 text-[#A3A3A3]" />
-              <span>{elapsed}s elapsed</span>
+            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-[#242424] text-[10px] font-mono text-white border border-[#333333]">
+              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+              <span>{displayPercent}%</span>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
             <div className="hidden md:flex items-center gap-1.5 text-[10px] text-[#777777] font-mono">
               <ShieldCheck className="w-3 h-3 text-emerald-500/80" />
-              <span>Real-ESRGAN Engine Connected</span>
+              <span>{selectedMode === 'studio' ? 'Studio Mode Active' : 'Real-ESRGAN Engine Connected'}</span>
             </div>
             {onCancel && (
               <button
@@ -115,13 +123,13 @@ export const StageProcessing: React.FC<StageProcessingProps> = ({
             {/* Subtle live scanning badge */}
             <div className="absolute top-3 left-3 bg-[#080808]/85 backdrop-blur-xs border border-[#383838] px-2.5 py-1 rounded text-[10px] font-mono text-white flex items-center gap-1.5 pointer-events-none">
               <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-              <span>Scanning Structure & Edges</span>
+              <span>{selectedMode === 'studio' ? 'Scanning Faces & Structure' : 'Scanning Structure & Edges'}</span>
             </div>
 
-            {/* Elapsed Timer Overlay */}
-            <div className="absolute bottom-3 right-3 bg-[#080808]/85 backdrop-blur-xs border border-[#383838] px-2.5 py-1 rounded text-[10px] font-mono text-[#A3A3A3] flex items-center gap-1.5 pointer-events-none">
-              <Clock className="w-3 h-3 text-white" />
-              <span>{elapsed}s</span>
+            {/* Real-time Percentage Indicator */}
+            <div className="absolute bottom-3 right-3 bg-[#080808]/85 backdrop-blur-xs border border-[#383838] px-2.5 py-1 rounded text-[10px] font-mono text-white flex items-center gap-1.5 pointer-events-none">
+              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+              <span>{displayPercent}%</span>
             </div>
           </div>
 

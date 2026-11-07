@@ -56,6 +56,7 @@ export interface PresetImage {
 }
 
 export type FlowStage = 'upload' | 'ready' | 'processing' | 'result' | 'error';
+export type ProcessingStudioMode = 'standard' | 'studio';
 
 export interface UpscaleResult {
   enhancedUrl: string;
@@ -67,4 +68,6 @@ export interface UpscaleResult {
   filename: string;
   scale?: ScaleValue;
   model?: string;
+  jobId?: string;
+  studioMode?: ProcessingStudioMode;
 }

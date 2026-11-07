@@ -14,6 +14,7 @@ import {
 } from '../../types';
 import { DEMO_PRESETS, ENHANCEMENT_TOOLS } from '../../data/presets';
 import { requestImageUpscale } from '../../services/upscaleService';
+import { checkBackendHealth } from '../../config/api';
 
 interface WorkspaceProps {
   onOpenEngineInfo: () => void;
@@ -175,6 +176,14 @@ export const Workspace: React.FC<WorkspaceProps> = ({
     const scaleNum: 2 | 4 = settings.upscaleFactor === '4x' ? 4 : 2;
 
     try {
+      const health = await checkBackendHealth();
+      if (!health.connected) {
+        throw new Error(
+          health.errorMessage ||
+            'Real-ESRGAN backend is currently offline or unreachable. Please verify that the tunnel is running.'
+        );
+      }
+
       onToast(`Submitting image to Real-ESRGAN backend (${scaleNum}× scale)...`, 'info');
       const res = await requestImageUpscale(
         metadata,
@@ -185,7 +194,8 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           if (info.message) {
             onToast(info.message, 'info');
           }
-        }
+        },
+        settings.strength ?? 70
       );
       setResult(res);
       onToast(`Real-ESRGAN inference complete (${res.outputWidth}×${res.outputHeight}px)!`, 'success');

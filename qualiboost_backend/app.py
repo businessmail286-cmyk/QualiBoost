@@ -53,8 +53,9 @@ else:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
+    allow_origin_regex=r"https://.*\.run\.app|https://.*\.trycloudflare\.com|http://localhost:\d+|http://127\.0\.0\.1:\d+",
     allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS", "DELETE"],
+    allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],
 )
@@ -88,11 +89,14 @@ def cleanup_old_jobs():
             shutil.rmtree(job["temp_dir"], ignore_errors=True)
 
 
-def process_enhance_job(job_id: str, file_bytes: bytes, scale: int, model: str):
-    """Background worker that runs Real-ESRGAN inference."""
+def process_enhance_job(job_id: str, file_bytes: bytes, scale: int, model: str, studio_mode: str = "standard"):
+    """Background worker that runs Real-ESRGAN inference with live progress tracking."""
     job = jobs[job_id]
     job["status"] = "processing"
-    job["progress"] = 0
+    job["progress"] = 5
+    job["progress_label"] = "Preparing image workspace..."
+    job["updated_at"] = time.time()
+
     temp_dir = Path(tempfile.mkdtemp(prefix="qualiboost_job_"))
     job["temp_dir"] = str(temp_dir)
     input_path = temp_dir / "input.png"
@@ -120,9 +124,18 @@ def process_enhance_job(job_id: str, file_bytes: bytes, scale: int, model: str):
         except (UnidentifiedImageError, OSError, ValueError) as e:
             raise HTTPException(status_code=415, detail=f"The uploaded file is not a valid supported image: {e}")
 
-        # Run Real-ESRGAN inference script
+        job["progress"] = 10
+        job["progress_label"] = (
+            "Launching Studio Mode (Real-ESRGAN + GFPGAN)..."
+            if studio_mode == "studio"
+            else "Launching Real-ESRGAN engine..."
+        )
+        job["updated_at"] = time.time()
+
+        # Run Real-ESRGAN inference script with -u for unbuffered stdout
         command = [
             sys.executable,
+            "-u",
             str(INFERENCE_SCRIPT),
             "-n", model,
             "-i", str(input_path),
@@ -131,20 +144,47 @@ def process_enhance_job(job_id: str, file_bytes: bytes, scale: int, model: str):
             "--ext", "png",
             "--fp32",
         ]
+        if studio_mode == "studio":
+            command.append("--face_enhance")
 
-        try:
-            completed = subprocess_run_with_timeout(
-                command,
-                cwd=str(ROOT),
-                timeout=int(os.getenv("QUALIBOOST_PROCESS_TIMEOUT_SECONDS", "600")),
-            )
-        except TimeoutError:
-            raise HTTPException(status_code=504, detail="Image processing timed out. Try a smaller image.")
+        import subprocess as sp
+        timeout_seconds = int(os.getenv("QUALIBOOST_PROCESS_TIMEOUT_SECONDS", "600"))
+        start_proc_time = time.time()
 
-        if completed.returncode != 0:
-            stderr = completed.stderr or ""
-            stdout = completed.stdout or ""
-            details = (stderr + stdout)[-3000:]
+        proc = sp.Popen(
+            command,
+            cwd=str(ROOT),
+            stdout=sp.PIPE,
+            stderr=sp.STDOUT,
+            text=True,
+            bufsize=1,
+            universal_newlines=True,
+        )
+
+        stdout_lines = []
+        for line in iter(proc.stdout.readline, ''):
+            stdout_lines.append(line)
+            line_str = line.strip()
+            if line_str.startswith("PROGRESS:"):
+                parts = line_str.split(":", 2)
+                if len(parts) >= 2:
+                    try:
+                        pct = max(0, min(99, int(parts[1])))
+                        job["progress"] = pct
+                        if len(parts) > 2 and parts[2]:
+                            job["progress_label"] = parts[2]
+                        job["updated_at"] = time.time()
+                    except ValueError:
+                        pass
+            if time.time() - start_proc_time > timeout_seconds:
+                proc.kill()
+                raise HTTPException(status_code=504, detail="Image processing timed out. Try a smaller image.")
+
+        proc.stdout.close()
+        return_code = proc.wait()
+
+        if return_code != 0:
+            details = "".join(stdout_lines)[-3000:]
             raise HTTPException(
                 status_code=500,
                 detail=f"Real-ESRGAN could not process this image. Check that dependencies and model weights are available. Error: {details}",
@@ -164,6 +204,8 @@ def process_enhance_job(job_id: str, file_bytes: bytes, scale: int, model: str):
         job["status"] = "completed"
         job["result_path"] = str(result_path)
         job["progress"] = 100
+        job["progress_label"] = "Image enhancement complete"
+        job["completed_at"] = time.time()
     except HTTPException:
         job["status"] = "failed"
         job["error"] = HTTPException.__dict__.get("detail", "Unknown error")
@@ -172,7 +214,6 @@ def process_enhance_job(job_id: str, file_bytes: bytes, scale: int, model: str):
         job["status"] = "failed"
         job["error"] = str(e)
     finally:
-        # Clean up temp dir after a delay, but keep result accessible for a while
         job["updated_at"] = time.time()
 
 
@@ -202,10 +243,10 @@ def subprocess_run_with_timeout(cmd, cwd, timeout):
     return result["proc"]
 
 
-def background_process_job(job_id: str, file_bytes: bytes, scale: int, model: str):
+def background_process_job(job_id: str, file_bytes: bytes, scale: int, model: str, studio_mode: str = "standard"):
     """Run the job processing in a background thread."""
     try:
-        process_enhance_job(job_id, file_bytes, scale, model)
+        process_enhance_job(job_id, file_bytes, scale, model, studio_mode)
     except HTTPException as e:
         # This is expected - just update job status
         if job_id in jobs:
@@ -232,6 +273,8 @@ async def create_enhance_job(
     file: UploadFile = File(...),
     scale: int = Form(4),
     model: str = Form("RealESRGAN_x4plus"),
+    sharpening: Optional[int] = Form(70),
+    studio_mode: Optional[str] = Form("standard"),
 ):
     """Submit an image enhancement job. Returns HTTP 202 with job ID."""
     validate_scale(scale)
@@ -267,6 +310,7 @@ async def create_enhance_job(
     jobs[job_id] = {
         "status": "queued",
         "progress": 0,
+        "studio_mode": studio_mode or "standard",
         "created_at": time.time(),
         "updated_at": time.time(),
     }
@@ -274,7 +318,7 @@ async def create_enhance_job(
     # Start background worker thread
     thread = threading.Thread(
         target=background_process_job,
-        args=(job_id, raw, scale, model),
+        args=(job_id, raw, scale, model, studio_mode or "standard"),
         daemon=True,
     )
     thread.start()
@@ -297,6 +341,7 @@ def get_job_status(job_id: str):
         "job_id": job_id,
         "status": job["status"],
         "progress": job.get("progress", 0),
+        "progress_label": job.get("progress_label"),
     }
     if job.get("error"):
         response["error"] = job["error"]
@@ -309,8 +354,8 @@ def get_job_status(job_id: str):
 
 
 @app.get("/api/jobs/{job_id}/result")
-def get_job_result(job_id: str):
-    """Get the enhanced image result for a completed job."""
+def get_job_result(job_id: str, format: Optional[str] = "png"):
+    """Get the enhanced image result for a completed job in PNG or JPEG format."""
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
@@ -323,6 +368,19 @@ def get_job_result(job_id: str):
     result_path = Path(job["result_path"])
     if not result_path.is_file():
         raise HTTPException(status_code=500, detail="Result file no longer available.")
+
+    if format and format.lower() in ("jpeg", "jpg"):
+        jpeg_path = result_path.parent / "enhanced_output.jpg"
+        if not jpeg_path.is_file():
+            with Image.open(result_path) as im:
+                rgb_im = im.convert("RGB")
+                rgb_im.save(jpeg_path, format="JPEG", quality=95)
+        return FileResponse(
+            path=str(jpeg_path),
+            media_type="image/jpeg",
+            filename="qualiboost-enhanced.jpg",
+            headers={"Cache-Control": "no-store"},
+        )
 
     return FileResponse(
         path=str(result_path),

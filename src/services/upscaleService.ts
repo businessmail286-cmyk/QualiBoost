@@ -1,9 +1,10 @@
-import { ImageMetadata, UpscaleResult, ScaleValue } from '../types';
+import { ImageMetadata, UpscaleResult, ScaleValue, ProcessingStudioMode } from '../types';
 import { API_CONFIG, parseJsonResponse, sanitizeBaseUrl } from '../config/api';
 
 export interface UpscaleProgressInfo {
   stage: 'queued' | 'processing' | 'downloading' | 'completed';
-  elapsedSeconds: number;
+  progressPercent: number; // 0 to 100
+  elapsedSeconds?: number;
   message?: string;
   isEstimate?: boolean;
 }
@@ -11,6 +12,7 @@ export interface UpscaleProgressInfo {
 interface JobStatusPayload {
   job_id: string;
   status: 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled';
+  progress?: number;
   elapsed_seconds?: number;
   progress_is_estimate?: boolean;
   progress_label?: string;
@@ -35,7 +37,9 @@ export async function requestImageUpscale(
   scale: ScaleValue = 4,
   model: string = 'RealESRGAN_x4plus',
   signal?: AbortSignal,
-  onProgress?: (info: UpscaleProgressInfo) => void
+  onProgress?: (info: UpscaleProgressInfo) => void,
+  sharpening: number = 70,
+  studioMode: ProcessingStudioMode = 'standard'
 ): Promise<UpscaleResult> {
   // 1. Validate that an image is selected
   if (!metadata || !metadata.url) {
@@ -67,15 +71,20 @@ export async function requestImageUpscale(
     );
   }
 
-  // 4. Validate scale (strictly 2, 3, or 4) and model
+  // 4. Validate scale (strictly 2, 3, or 4), model, and sharpening (0-100)
   const validScale: ScaleValue = scale === 2 || scale === 3 || scale === 4 ? scale : 4;
   const validModel = model && model.trim() ? model.trim() : 'RealESRGAN_x4plus';
+  const validSharpening = Math.round(
+    Math.min(100, Math.max(0, typeof sharpening === 'number' && !isNaN(sharpening) ? sharpening : 70))
+  );
 
-  // 5. Construct FormData (do NOT manually set Content-Type header)
+  // 5. Construct FormData (do NOT manually set Content-Type header; browser sets multipart boundary)
   const formData = new FormData();
   formData.append('file', uploadFile, metadata.name || 'image.png');
   formData.append('scale', validScale.toString());
   formData.append('model', validModel);
+  formData.append('sharpening', validSharpening.toString());
+  formData.append('studio_mode', studioMode === 'studio' ? 'studio' : 'standard');
 
   const configuredBase = sanitizeBaseUrl(API_CONFIG.getBaseUrl());
 
@@ -103,32 +112,23 @@ export async function requestImageUpscale(
   }
 
   const startTime = Date.now();
-  let progressTimer: any = null;
 
-  // Live progress ticker for indeterminate animation
+  // Initial progress event
   const startProgressTicker = () => {
     onProgress?.({
       stage: 'processing',
+      progressPercent: 0,
       elapsedSeconds: 0,
-      message: `Submitting image to Real-ESRGAN ${validScale}× pipeline...`,
+      message:
+        studioMode === 'studio'
+          ? 'Submitting image to Studio Mode (4× Real-ESRGAN + GFPGAN Face Restoration)...'
+          : `Submitting image to Real-ESRGAN ${validScale}× pipeline...`,
       isEstimate: false,
     });
-    progressTimer = setInterval(() => {
-      const elapsed = Math.round((Date.now() - startTime) / 1000);
-      onProgress?.({
-        stage: 'processing',
-        elapsedSeconds: elapsed,
-        message: `Real-ESRGAN ${validScale}× inference in progress (${elapsed}s elapsed)...`,
-        isEstimate: false,
-      });
-    }, 1000);
   };
 
   const stopProgressTicker = () => {
-    if (progressTimer) {
-      clearInterval(progressTimer);
-      progressTimer = null;
-    }
+    // No-op kept for cleanup symmetry
   };
 
   let is404MissingJobsEndpoint = false;
@@ -162,12 +162,13 @@ export async function requestImageUpscale(
 
         onProgress?.({
           stage: 'completed',
+          progressPercent: 100,
           elapsedSeconds: Math.round((Date.now() - startTime) / 1000),
           message: 'Inference complete! Preparing image preview...',
           isEstimate: false,
         });
 
-        return buildUpscaleResult(blob, contentType || 'image/png', metadata, validScale, validModel);
+        return buildUpscaleResult(blob, contentType || 'image/png', metadata, validScale, validModel, undefined, studioMode);
       }
 
       // Case B: Backend returns JSON (job submission with job_id or error)
@@ -188,7 +189,8 @@ export async function requestImageUpscale(
             validScale,
             validModel,
             signal,
-            onProgress
+            onProgress,
+            studioMode
           );
         }
 
@@ -211,7 +213,13 @@ export async function requestImageUpscale(
         if (err.name === 'AbortError') {
           throw new Error('Enhancement request was cancelled.');
         }
-        submitErrors.push(`Failed to reach ${endpoint}: ${err.message}`);
+        if (err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError')) {
+          submitErrors.push(
+            `CORS restriction reaching ${endpoint}: The FastAPI backend blocked cross-origin requests from ${typeof window !== 'undefined' ? window.location.origin : 'this origin'}. Please set QUALIBOOST_ALLOWED_ORIGINS="*" in your backend environment.`
+          );
+        } else {
+          submitErrors.push(`Failed to reach ${endpoint}: ${err.message}`);
+        }
       } else {
         submitErrors.push(`Failed to reach ${endpoint}: Network error`);
       }
@@ -270,7 +278,8 @@ async function pollAsyncJob(
   validScale: ScaleValue,
   validModel: string,
   signal?: AbortSignal,
-  onProgress?: (info: UpscaleProgressInfo) => void
+  onProgress?: (info: UpscaleProgressInfo) => void,
+  studioMode: ProcessingStudioMode = 'standard'
 ): Promise<UpscaleResult> {
   const rootBase = submissionEndpoint.startsWith('/')
     ? ''
@@ -278,10 +287,16 @@ async function pollAsyncJob(
   const statusEndpoint = rootBase ? `${rootBase}/api/jobs/${jobId}` : `/api/jobs/${jobId}`;
   const resultEndpoint = rootBase ? `${rootBase}/api/jobs/${jobId}/result` : `/api/jobs/${jobId}/result`;
 
+  let currentPercent = 0;
+
   onProgress?.({
     stage: 'queued',
+    progressPercent: 0,
     elapsedSeconds: 0,
-    message: 'Inference job queued in Real-ESRGAN backend...',
+    message:
+      studioMode === 'studio'
+        ? 'Inference job queued in Studio Mode pipeline...'
+        : 'Inference job queued in Real-ESRGAN backend...',
     isEstimate: false,
   });
 
@@ -312,6 +327,11 @@ async function pollAsyncJob(
     const statusData = parsedStatus.data;
     const elapsedSec = Math.round((Date.now() - startTime) / 1000);
 
+    // Read genuine progress percentage from backend
+    if (typeof statusData.progress === 'number' && !isNaN(statusData.progress)) {
+      currentPercent = Math.max(currentPercent, Math.min(100, Math.round(statusData.progress)));
+    }
+
     if (statusData.status === 'failed') {
       throw new Error(`Real-ESRGAN inference failed: ${statusData.error || 'Unknown engine error'}`);
     }
@@ -321,8 +341,10 @@ async function pollAsyncJob(
     }
 
     if (statusData.status === 'completed') {
+      currentPercent = 100;
       onProgress?.({
         stage: 'downloading',
+        progressPercent: 100,
         elapsedSeconds: elapsedSec,
         message: 'Inference complete! Downloading enhanced PNG...',
         isEstimate: false,
@@ -332,12 +354,15 @@ async function pollAsyncJob(
 
     onProgress?.({
       stage: statusData.status === 'processing' ? 'processing' : 'queued',
+      progressPercent: currentPercent,
       elapsedSeconds: statusData.elapsed_seconds ?? elapsedSec,
       message:
         statusData.progress_label ||
         (statusData.status === 'processing'
-          ? `Real-ESRGAN inference active (${elapsedSec}s elapsed)...`
-          : `Job queued in backend (${elapsedSec}s)...`),
+          ? studioMode === 'studio'
+            ? `Studio Mode active: Real-ESRGAN + GFPGAN (${currentPercent}%)...`
+            : `Real-ESRGAN inference active (${currentPercent}%)...`
+          : `Job queued in backend...`),
       isEstimate: Boolean(statusData.progress_is_estimate),
     });
   }
@@ -359,12 +384,83 @@ async function pollAsyncJob(
 
   onProgress?.({
     stage: 'completed',
+    progressPercent: 100,
     elapsedSeconds: Math.round((Date.now() - startTime) / 1000),
     message: 'Processing complete! Preparing image preview...',
     isEstimate: false,
   });
 
-  return buildUpscaleResult(blob, resultContentType || 'image/png', metadata, validScale, validModel);
+  return buildUpscaleResult(blob, resultContentType || 'image/png', metadata, validScale, validModel, jobId, studioMode);
+}
+
+/**
+ * Downloads the completed enhanced image from the backend in the specified format ('png' or 'jpeg').
+ * PNG endpoint: GET /api/jobs/{job_id}/result (maximum preservation)
+ * JPEG endpoint: GET /api/jobs/{job_id}/result?format=jpeg (quality 95)
+ */
+export async function downloadJobResultBlob(
+  jobId: string,
+  format: 'png' | 'jpeg',
+  cachedBlob?: Blob
+): Promise<Blob> {
+  // If format is PNG and we already have a valid PNG blob in memory, return it directly
+  if (
+    format === 'png' &&
+    cachedBlob &&
+    cachedBlob.size > 0 &&
+    (cachedBlob.type === 'image/png' || !cachedBlob.type || cachedBlob.type.includes('png'))
+  ) {
+    return cachedBlob;
+  }
+
+  const configuredBase = sanitizeBaseUrl(API_CONFIG.getBaseUrl());
+  const pathWithQuery = `/api/jobs/${jobId}/result${format === 'jpeg' ? '?format=jpeg' : ''}`;
+  const directUrl = API_CONFIG.getJobResultUrl(jobId) + (format === 'jpeg' ? '?format=jpeg' : '');
+
+  const endpointsToTry: string[] = [pathWithQuery];
+  if (directUrl && directUrl.startsWith('http') && directUrl !== pathWithQuery) {
+    endpointsToTry.push(directUrl);
+  }
+
+  let lastError = 'Failed to download enhanced image.';
+
+  for (const endpoint of endpointsToTry) {
+    try {
+      const headers: Record<string, string> = {
+        Accept: format === 'jpeg' ? 'image/jpeg, image/*, */*' : 'image/png, image/*, */*',
+      };
+      if (endpoint.startsWith('/') && configuredBase) {
+        headers['x-backend-target-url'] = configuredBase;
+      }
+
+      const res = await fetch(endpoint, {
+        method: 'GET',
+        headers,
+      });
+
+      const contentType = (res.headers.get('content-type') || '').toLowerCase();
+
+      if (!res.ok || contentType.includes('application/json') || contentType.includes('text/html')) {
+        const parsedErr = await parseJsonResponse(res, `image download (${endpoint})`);
+        lastError = parsedErr.ok ? JSON.stringify(parsedErr.data) : parsedErr.error;
+        continue;
+      }
+
+      const blob = await res.blob();
+      if (blob.size === 0) {
+        lastError = `Backend returned an empty ${format.toUpperCase()} image (0 bytes).`;
+        continue;
+      }
+
+      return blob;
+    } catch (err) {
+      if (err instanceof Error) {
+        lastError = err.message;
+      }
+    }
+  }
+
+  throw new Error(lastError);
 }
 
 /**
@@ -376,7 +472,9 @@ async function buildUpscaleResult(
   contentType: string,
   metadata: ImageMetadata,
   scale: ScaleValue,
-  model: string
+  model: string,
+  jobId?: string,
+  studioMode?: ProcessingStudioMode
 ): Promise<UpscaleResult> {
   const enhancedUrl = URL.createObjectURL(blob);
 
@@ -400,5 +498,7 @@ async function buildUpscaleResult(
     filename: 'qualiboost-enhanced.png',
     scale,
     model,
+    jobId,
+    studioMode,
   };
 }
