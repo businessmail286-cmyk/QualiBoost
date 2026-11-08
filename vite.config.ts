@@ -27,7 +27,7 @@ function getTargetUrl(): string {
   if (fs.existsSync('.env')) {
     try {
       const parsed = dotenv.parse(fs.readFileSync('.env'));
-      const val = parsed.VITE_API_BASE_URL?.trim() || parsed.VITE_QUALIBOOST_API_URL?.trim();
+      const val = parsed.VITE_QUALIBOOST_API_URL?.trim() || parsed.VITE_API_BASE_URL?.trim();
       if (val) {
         return sanitizeTargetUrl(val);
       }
@@ -35,13 +35,13 @@ function getTargetUrl(): string {
       // ignore
     }
   }
-  if (process.env.VITE_API_BASE_URL?.trim()) {
-    return sanitizeTargetUrl(process.env.VITE_API_BASE_URL.trim());
-  }
   if (process.env.VITE_QUALIBOOST_API_URL?.trim()) {
     return sanitizeTargetUrl(process.env.VITE_QUALIBOOST_API_URL.trim());
   }
-  return 'https://packages-separately-send-mobiles.trycloudflare.com';
+  if (process.env.VITE_API_BASE_URL?.trim()) {
+    return sanitizeTargetUrl(process.env.VITE_API_BASE_URL.trim());
+  }
+  return 'https://none-salary-controllers-precision.trycloudflare.com';
 }
 
 function qualiboostProxyPlugin(): Plugin {

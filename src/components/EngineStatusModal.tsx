@@ -33,7 +33,7 @@ export const EngineStatusModal: React.FC<EngineStatusModalProps> = ({
   if (!isOpen) return null;
 
   const baseUrl = API_CONFIG.getBaseUrl() || '(Using Vite local proxy)';
-  const enhanceUrl = API_CONFIG.getEnhanceUrl();
+  const jobsSubmitUrl = API_CONFIG.getJobsSubmitUrl();
   const healthUrl = API_CONFIG.getHealthUrl();
 
   return (
@@ -125,12 +125,12 @@ export const EngineStatusModal: React.FC<EngineStatusModalProps> = ({
                 <span>{healthUrl}</span>
               </div>
               <div className="flex items-center justify-between text-[#A3A3A3]">
-                <span className="text-[#777777]">Inference Endpoint:</span>
-                <span className="text-white">{enhanceUrl}</span>
+                <span className="text-[#777777]">Enhancement Endpoint:</span>
+                <span className="text-white">{jobsSubmitUrl}</span>
               </div>
               <div className="flex items-center justify-between text-[#A3A3A3]">
                 <span className="text-[#777777]">Connection Type:</span>
-                <span>Temporary Cloudflare Tunnel (Google Colab)</span>
+                <span>Cloudflare Tunnel (Google Colab)</span>
               </div>
               <div className="flex items-center justify-between text-[#A3A3A3]">
                 <span className="text-[#777777]">Supported Scales:</span>
@@ -147,7 +147,7 @@ export const EngineStatusModal: React.FC<EngineStatusModalProps> = ({
             </div>
             <div className="bg-[#0a0a0a] border border-[#222222] rounded-lg p-3 font-mono text-[11px] text-[#A3A3A3] space-y-1">
               <p className="text-[#777777]"># Active Tunnel Target:</p>
-              <p className="text-white">https://gravity-kid-starts-queen.trycloudflare.com/api/jobs/enhance</p>
+              <p className="text-white">{jobsSubmitUrl}</p>
               <p className="text-[#777777] mt-1"># Running in Google Colab session through Cloudflare tunnel</p>
             </div>
           </div>

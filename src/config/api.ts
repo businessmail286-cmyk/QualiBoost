@@ -11,7 +11,7 @@ export interface BackendHealthStatus {
   checkedAt?: Date;
 }
 
-export const DEFAULT_PRODUCTION_API_URL = 'https://packages-separately-send-mobiles.trycloudflare.com';
+export const DEFAULT_PRODUCTION_API_URL = 'https://none-salary-controllers-precision.trycloudflare.com';
 
 /**
  * Normalizes and sanitizes a backend base URL:
@@ -24,6 +24,10 @@ export function sanitizeBaseUrl(raw?: string | null): string {
   let url = raw.trim().replace(/\/+$/, '');
   // Remove /docs, /health, /redoc, /openapi.json if accidentally included
   url = url.replace(/\/(docs|health|redoc|openapi\.json)$/i, '');
+  // Remove accidental trailing endpoints like /api/jobs/enhance, /api/enhance, or /api/jobs
+  url = url.replace(/\/api\/jobs\/enhance$/i, '');
+  url = url.replace(/\/api\/enhance$/i, '');
+  url = url.replace(/\/api\/jobs$/i, '');
   // Remove trailing duplicate /api so appending /api/jobs/enhance doesn't produce /api/api/...
   url = url.replace(/\/api$/i, '');
   return url.replace(/\/+$/, '');
@@ -108,8 +112,12 @@ export const API_CONFIG = {
         const stored = localStorage.getItem('qualiboost_api_url');
         if (stored !== null && stored.trim() !== '') {
           const sanitized = sanitizeBaseUrl(stored);
-          // If stored URL was previous render or previous temporary tunnel, ignore it so it falls back to active tunnel
-          const staleKeywords = ['onrender.com', 'understood-centers-level-thee', 'gravity-kid-starts-queen'];
+          const staleKeywords = [
+            'onrender.com',
+            'understood-centers-level-thee',
+            'gravity-kid-starts-queen',
+            'packages-separately-send-mobiles',
+          ];
           if (sanitized && !staleKeywords.some((k) => sanitized.includes(k))) {
             return sanitized;
           }
@@ -148,11 +156,6 @@ export const API_CONFIG = {
   getHealthUrl(overrideBase?: string): string {
     const base = sanitizeBaseUrl(overrideBase !== undefined ? overrideBase : this.getBaseUrl());
     return base ? `${base}/health` : '/health';
-  },
-
-  getEnhanceUrl(overrideBase?: string): string {
-    const base = sanitizeBaseUrl(overrideBase !== undefined ? overrideBase : this.getBaseUrl());
-    return base ? `${base}/api/enhance` : '/api/enhance';
   },
 
   getJobsSubmitUrl(overrideBase?: string): string {

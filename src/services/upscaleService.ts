@@ -131,7 +131,6 @@ export async function requestImageUpscale(
     // No-op kept for cleanup symmetry
   };
 
-  let is404MissingJobsEndpoint = false;
   const submitErrors: string[] = [];
 
   for (const endpoint of submitEndpoints) {
@@ -195,16 +194,12 @@ export async function requestImageUpscale(
         }
 
         if (!parsed.ok) {
-          if (parsed.statusCode === 404) is404MissingJobsEndpoint = true;
           submitErrors.push(parsed.error);
         } else {
           submitErrors.push(parsed.data?.message || `Received unexpected JSON from ${endpoint}`);
         }
       } else {
         const parsedErr = await parseJsonResponse(res, `job submission response (${endpoint})`);
-        if (!parsedErr.ok && parsedErr.statusCode === 404) {
-          is404MissingJobsEndpoint = true;
-        }
         submitErrors.push(parsedErr.ok ? JSON.stringify(parsedErr.data) : parsedErr.error);
       }
     } catch (err: unknown) {
@@ -222,39 +217,6 @@ export async function requestImageUpscale(
         }
       } else {
         submitErrors.push(`Failed to reach ${endpoint}: Network error`);
-      }
-    }
-  }
-
-  // --------------------------------------------------------------------------
-  // Fallback: If /api/jobs/enhance returned 404, check /api/enhance?scale=X
-  // --------------------------------------------------------------------------
-  if (is404MissingJobsEndpoint) {
-    const directEnhance = `${API_CONFIG.getEnhanceUrl()}?scale=${validScale}`;
-    const fallbackEndpoints = directEnhance.startsWith('http')
-      ? [directEnhance, `/api/enhance?scale=${validScale}`]
-      : [`/api/enhance?scale=${validScale}`, directEnhance];
-
-    for (const endpoint of fallbackEndpoints) {
-      if (signal?.aborted) throw new Error('Enhancement request was cancelled.');
-
-      try {
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: getHeaders(endpoint),
-          body: formData,
-          signal,
-        });
-
-        const contentType = (res.headers.get('content-type') || '').toLowerCase();
-        if (res.ok && (contentType.startsWith('image/') || contentType.includes('application/octet-stream'))) {
-          const blob = await res.blob();
-          if (blob.size > 0) {
-            return buildUpscaleResult(blob, contentType || 'image/png', metadata, validScale, validModel);
-          }
-        }
-      } catch {
-        // ignore fallback errors
       }
     }
   }
@@ -283,7 +245,7 @@ async function pollAsyncJob(
 ): Promise<UpscaleResult> {
   const rootBase = submissionEndpoint.startsWith('/')
     ? ''
-    : submissionEndpoint.replace(/\/api\/(jobs\/enhance|enhance)\/?.*$/, '');
+    : submissionEndpoint.replace(/\/api\/jobs\/enhance\/?.*$/, '');
   const statusEndpoint = rootBase ? `${rootBase}/api/jobs/${jobId}` : `/api/jobs/${jobId}`;
   const resultEndpoint = rootBase ? `${rootBase}/api/jobs/${jobId}/result` : `/api/jobs/${jobId}/result`;
 

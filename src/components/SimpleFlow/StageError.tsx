@@ -26,7 +26,7 @@ export const StageError: React.FC<StageErrorProps> = ({
     errorMessage.includes('502') ||
     errorMessage.includes('503');
 
-  const enhanceEndpoint = API_CONFIG.getEnhanceUrl();
+  const jobsSubmitEndpoint = API_CONFIG.getJobsSubmitUrl();
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
@@ -59,11 +59,11 @@ export const StageError: React.FC<StageErrorProps> = ({
         {isBackendMissing && (
           <div className="bg-[#111111] border border-[#292929] rounded-xl p-4 text-xs font-mono space-y-2 text-[#A3A3A3]">
             <div className="flex items-center justify-between text-[#777777]">
-              <span>Real-ESRGAN Inference Endpoint</span>
-              <span>Endpoint: {enhanceEndpoint}</span>
+              <span>Real-ESRGAN Submission Endpoint</span>
+              <span>Endpoint: {jobsSubmitEndpoint}</span>
             </div>
             <p className="text-[#A3A3A3] font-sans leading-normal">
-              QualiBoost connects to the Real-ESRGAN backend running in Google Colab via a temporary Cloudflare tunnel (<code className="text-white font-mono">{enhanceEndpoint}</code>). If the connection fails, verify that the Google Colab session and Cloudflare tunnel are active, or configure a new endpoint in Settings.
+              QualiBoost connects to the Real-ESRGAN backend running in Google Colab via a Cloudflare tunnel (<code className="text-white font-mono">{jobsSubmitEndpoint}</code>). If the connection fails, verify that the Google Colab session and Cloudflare tunnel are active, or configure a new endpoint in Settings.
             </p>
           </div>
         )}
