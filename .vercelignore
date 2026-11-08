@@ -1,0 +1,7 @@
+backend_git_repo/
+zip_staging/
+qualiboost_backend/
+**/__pycache__/
+**/.venv/
+**/venv/
+**/*.pyc
