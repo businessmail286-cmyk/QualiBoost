@@ -20,7 +20,7 @@ export const DEFAULT_PRODUCTION_API_URL = 'https://loving-pointer-worlds-electio
  * - Strips duplicate /api suffix from base URL
  */
 export function sanitizeBaseUrl(raw?: string | null): string {
-  if (!raw) return '';
+  if (!raw || !raw.trim()) return DEFAULT_PRODUCTION_API_URL;
   let url = raw.trim().replace(/\/+$/, '');
   // Remove /docs, /health, /redoc, /openapi.json if accidentally included
   url = url.replace(/\/(docs|health|redoc|openapi\.json)$/i, '');
@@ -30,8 +30,47 @@ export function sanitizeBaseUrl(raw?: string | null): string {
   url = url.replace(/\/api\/jobs$/i, '');
   // Remove trailing duplicate /api so appending /api/jobs/enhance doesn't produce /api/api/...
   url = url.replace(/\/api$/i, '');
-  return url.replace(/\/+$/, '');
+  return url.replace(/\/+$/, '') || DEFAULT_PRODUCTION_API_URL;
 }
+
+/**
+ * Formats error details from FastAPI/HTTP responses into human-readable strings,
+ * preventing '[object Object]' or unhelpful validation error dumps.
+ */
+export function formatErrorDetail(detail: unknown): string {
+  if (!detail) return '';
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object') {
+          const loc = Array.isArray((item as any).loc)
+            ? (item as any).loc.filter((p: any) => p !== 'body').join('.')
+            : (item as any).loc
+            ? String((item as any).loc)
+            : '';
+          const msg = (item as any).msg || (item as any).message || JSON.stringify(item);
+          return loc ? `${loc}: ${msg}` : msg;
+        }
+        return String(item);
+      })
+      .join('; ');
+  }
+  if (typeof detail === 'object') {
+    const obj = detail as Record<string, any>;
+    if (obj.message && typeof obj.message === 'string') return obj.message;
+    if (obj.error && typeof obj.error === 'string') return obj.error;
+    if (obj.detail) return formatErrorDetail(obj.detail);
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return String(detail);
+    }
+  }
+  return String(detail);
+}
+
 
 /**
  * Safely parses a response expected to be JSON.
@@ -156,159 +195,158 @@ export const API_CONFIG = {
 
   getHealthUrl(overrideBase?: string): string {
     const base = sanitizeBaseUrl(overrideBase !== undefined ? overrideBase : this.getBaseUrl());
-    return base ? `${base}/health` : '/health';
+    return `${base}/health`;
   },
 
   getJobsSubmitUrl(overrideBase?: string): string {
     const base = sanitizeBaseUrl(overrideBase !== undefined ? overrideBase : this.getBaseUrl());
-    return base ? `${base}/api/jobs/enhance` : '/api/jobs/enhance';
+    return `${base}/api/jobs/enhance`;
   },
 
   getJobStatusUrl(jobId: string, overrideBase?: string): string {
     const base = sanitizeBaseUrl(overrideBase !== undefined ? overrideBase : this.getBaseUrl());
-    return base ? `${base}/api/jobs/${jobId}` : `/api/jobs/${jobId}`;
+    return `${base}/api/jobs/${jobId}`;
   },
 
   getJobResultUrl(jobId: string, overrideBase?: string): string {
     const base = sanitizeBaseUrl(overrideBase !== undefined ? overrideBase : this.getBaseUrl());
-    return base ? `${base}/api/jobs/${jobId}/result` : `/api/jobs/${jobId}/result`;
+    return `${base}/api/jobs/${jobId}/result`;
   },
 };
 
 /**
  * Performs an authentic health-check request to the Real-ESRGAN backend.
  * Conforms to contract: GET /health -> {"status": "ok"}
+ * Uses direct backend base URL consistently in both Preview and Vercel production.
  */
 export async function checkBackendHealth(
   overrideUrl?: string,
   timeoutMs = 12000
 ): Promise<BackendHealthStatus> {
-  const directUrl = overrideUrl ? API_CONFIG.getHealthUrl(overrideUrl) : API_CONFIG.getHealthUrl();
-  const urlsToTry: string[] = [];
+  const targetUrl = overrideUrl ? API_CONFIG.getHealthUrl(overrideUrl) : API_CONFIG.getHealthUrl();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  // Always try relative same-origin proxy first (/health) to avoid cross-origin CORS blocks
-  // in hosted environments (e.g. Google Cloud Run preview). The proxy sets Origin: http://localhost:3000.
-  urlsToTry.push('/health');
-  if (directUrl && directUrl.startsWith('http') && directUrl !== '/health') {
-    urlsToTry.push(directUrl);
-  }
-
-  let lastError = 'Connection failed';
-  let lastStatusText = 'Unreachable';
-
-  for (const url of urlsToTry) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      const configuredBase = overrideUrl ? overrideUrl.trim().replace(/\/+$/, '') : API_CONFIG.getBaseUrl();
-      const headers: Record<string, string> = {
+  try {
+    const response = await fetch(targetUrl, {
+      method: 'GET',
+      headers: {
         Accept: 'application/json',
-      };
-      // Only attach routing header to relative proxy endpoint (/health)
-      // Never send custom headers to external URLs to avoid triggering CORS preflight rejections
-      if (url.startsWith('/') && configuredBase) {
-        headers['x-backend-target-url'] = configuredBase;
-      }
+      },
+      signal: controller.signal,
+    });
 
-      const response = await fetch(url, {
-        method: 'GET',
-        headers,
-        signal: controller.signal,
-      });
+    clearTimeout(timeoutId);
 
-      clearTimeout(timeoutId);
+    // Verify Content-Type is JSON (not HTML fallback or CDN error page)
+    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+    if (!contentType.includes('application/json')) {
+      const textPreview = await response.text().catch(() => '');
+      const sanitized = textPreview.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
 
-      // Verify Content-Type is JSON (not HTML fallback)
-      const contentType = response.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) {
-        const textPreview = await response.text().catch(() => '');
-        const sanitized = textPreview.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
-        if (response.status === 502 || response.status === 503 || response.status === 504) {
-          lastError = `HTTP ${response.status}: Backend tunnel is unreachable or disconnected. Google Colab session may need to be restarted.`;
-          lastStatusText = `Tunnel offline (HTTP ${response.status})`;
-          continue;
-        }
-        lastError = `HTTP ${response.status}: Endpoint ${url} returned non-JSON format (${contentType || 'HTML'}): ${sanitized || response.statusText || 'Unexpected format'}`;
-        lastStatusText = `HTTP ${response.status}`;
-        continue;
-      }
+      let errMsg = '';
+      let statusText = `HTTP ${response.status}`;
 
-      if (!response.ok) {
-        const errJson = await response.json().catch(() => null);
-        const detailMsg = errJson?.detail || errJson?.error || errJson?.message || response.statusText;
-
-        if (response.status === 401) {
-          lastError =
-            'HTTP 401 Unauthorized: Target reached an internal container daemon. Real-ESRGAN requires no authorization. Please verify the API Base URL in Settings.';
-          lastStatusText = 'Auth conflict (HTTP 401)';
-          continue;
-        } else if (response.status === 503 || response.status === 502) {
-          lastError = `HTTP ${response.status}: ${detailMsg || 'Backend service unavailable. The Cloudflare tunnel may be offline.'}`;
-          lastStatusText = `Offline (HTTP ${response.status})`;
-          continue;
-        } else {
-          lastError = `HTTP ${response.status}: Health check failed (${detailMsg || response.statusText})`;
-          lastStatusText = `HTTP ${response.status}`;
-        }
-
-        return {
-          connected: false,
-          endpointUrl: url,
-          statusText: lastStatusText,
-          errorMessage: lastError,
-          checkedAt: new Date(),
-        };
-      }
-
-      const data = await response.json().catch(() => null);
-
-      // Verify authentic Real-ESRGAN backend contract.
-      // Do NOT accept {"status": "healthy"} from internal container control-plane-api.
-      if (data && data.status === 'healthy' && !data.engine_source_found && !data.async_jobs_supported) {
-        lastError =
-          'Connected to preview container port 8000 instead of Real-ESRGAN backend. Please configure your Cloudflare tunnel URL in Settings.';
-        lastStatusText = 'Wrong Target';
-        continue;
-      }
-
-      if (data && data.status === 'ok') {
-        const gpuNote = data.gpu ? ` (${data.gpu.replace('NVIDIA ', '')})` : '';
-        return {
-          connected: true,
-          statusText: `Ready${gpuNote}`,
-          endpointUrl: url,
-          checkedAt: new Date(),
-        };
+      if (response.status === 502 || response.status === 503 || response.status === 504) {
+        errMsg = `HTTP ${response.status}: Backend tunnel is unreachable or disconnected. Google Colab session may need to be restarted.`;
+        statusText = `Tunnel offline (HTTP ${response.status})`;
+      } else if (response.status === 404) {
+        errMsg = `HTTP 404: Health endpoint not found at ${targetUrl}. Server returned non-JSON page: ${sanitized || 'Not Found'}`;
+        statusText = 'HTTP 404';
+      } else {
+        errMsg = `HTTP ${response.status}: Endpoint returned non-JSON format (${contentType || 'HTML'}): ${sanitized || response.statusText || 'Unexpected format'}`;
       }
 
       return {
         connected: false,
-        endpointUrl: url,
-        statusText: 'Invalid response format',
-        errorMessage: 'Backend returned 200 OK but response did not contain {"status": "ok"}.',
+        endpointUrl: targetUrl,
+        statusText,
+        errorMessage: errMsg,
         checkedAt: new Date(),
       };
-    } catch (err: unknown) {
-      clearTimeout(timeoutId);
-      if (err instanceof Error) {
-        if (err.name === 'AbortError') {
-          lastError = `Request timed out after ${timeoutMs}ms`;
-        } else if (err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError')) {
-          lastError = `CORS or network error reaching ${url}. Browser blocked access because the FastAPI backend does not allow origin ${window.location.origin} (CORS disallowed) or the tunnel is down.`;
-        } else {
-          lastError = err.message || 'Network unreachable';
-        }
-      }
-      continue;
     }
-  }
 
-  return {
-    connected: false,
-    endpointUrl: directUrl,
-    statusText: lastStatusText,
-    errorMessage: lastError,
-    checkedAt: new Date(),
-  };
+    if (!response.ok) {
+      const errJson = await response.json().catch(() => null);
+      const rawDetail = errJson?.detail || errJson?.error || errJson?.message;
+      const detailMsg = formatErrorDetail(rawDetail) || response.statusText;
+
+      let errMsg = '';
+      let statusText = `HTTP ${response.status}`;
+
+      if (response.status === 401) {
+        errMsg =
+          'HTTP 401 Unauthorized: Target reached an internal daemon requiring authorization. Real-ESRGAN requires no authorization. Please verify API Base URL in Settings.';
+        statusText = 'Auth conflict (HTTP 401)';
+      } else if (response.status === 503 || response.status === 502) {
+        errMsg = `HTTP ${response.status}: ${detailMsg || 'Backend service unavailable. The Cloudflare tunnel may be offline.'}`;
+        statusText = `Offline (HTTP ${response.status})`;
+      } else {
+        errMsg = `HTTP ${response.status}: Health check failed (${detailMsg || response.statusText})`;
+      }
+
+      return {
+        connected: false,
+        endpointUrl: targetUrl,
+        statusText,
+        errorMessage: errMsg,
+        checkedAt: new Date(),
+      };
+    }
+
+    const data = await response.json().catch(() => null);
+
+    // Verify authentic Real-ESRGAN backend contract.
+    // Do NOT accept {"status": "healthy"} from internal container control-plane-api.
+    if (data && data.status === 'healthy' && !data.engine_source_found && !data.async_jobs_supported) {
+      return {
+        connected: false,
+        endpointUrl: targetUrl,
+        statusText: 'Wrong Target',
+        errorMessage:
+          'Connected to preview container port 8000 instead of Real-ESRGAN backend. Please configure your Cloudflare tunnel URL in Settings.',
+        checkedAt: new Date(),
+      };
+    }
+
+    if (data && data.status === 'ok') {
+      const gpuNote = data.gpu ? ` (${data.gpu.replace('NVIDIA ', '')})` : '';
+      return {
+        connected: true,
+        statusText: `Ready${gpuNote}`,
+        endpointUrl: targetUrl,
+        checkedAt: new Date(),
+      };
+    }
+
+    return {
+      connected: false,
+      endpointUrl: targetUrl,
+      statusText: 'Invalid response format',
+      errorMessage: `Backend returned HTTP 200 but response body did not contain {"status": "ok"}: ${JSON.stringify(data)}`,
+      checkedAt: new Date(),
+    };
+  } catch (err: unknown) {
+    clearTimeout(timeoutId);
+    let errMsg = 'Network unreachable';
+    if (err instanceof Error) {
+      if (err.name === 'AbortError') {
+        errMsg = `Health check timed out after ${timeoutMs}ms`;
+      } else if (err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError')) {
+        errMsg = `Network or CORS error reaching ${targetUrl}. The backend tunnel at ${targetUrl} may be offline, or cross-origin requests from ${typeof window !== 'undefined' ? window.location.origin : 'this origin'} are disallowed.`;
+      } else {
+        errMsg = err.message || 'Network unreachable';
+      }
+    } else {
+      errMsg = formatErrorDetail(err) || 'Network unreachable';
+    }
+
+    return {
+      connected: false,
+      endpointUrl: targetUrl,
+      statusText: 'Unreachable',
+      errorMessage: errMsg,
+      checkedAt: new Date(),
+    };
+  }
 }

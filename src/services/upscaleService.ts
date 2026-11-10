@@ -1,5 +1,5 @@
 import { ImageMetadata, UpscaleResult, ScaleValue, ProcessingStudioMode } from '../types';
-import { API_CONFIG, parseJsonResponse, sanitizeBaseUrl } from '../config/api';
+import { API_CONFIG, parseJsonResponse, sanitizeBaseUrl, formatErrorDetail } from '../config/api';
 
 export interface UpscaleProgressInfo {
   stage: 'queued' | 'processing' | 'downloading' | 'completed';
@@ -88,144 +88,107 @@ export async function requestImageUpscale(
 
   const configuredBase = sanitizeBaseUrl(API_CONFIG.getBaseUrl());
 
-  // Helper to build headers for same-origin proxy
-  const getHeaders = (endpointUrl: string): Record<string, string> => {
-    const headers: Record<string, string> = {
-      Accept: 'application/json, image/*, */*',
-    };
-    if (endpointUrl.startsWith('/') && configuredBase) {
-      headers['x-backend-target-url'] = configuredBase;
-    }
-    return headers;
-  };
-
   // --------------------------------------------------------------------------
   // Step 1: Submit to Real-ESRGAN /api/jobs/enhance
   // --------------------------------------------------------------------------
-  const directJobs = API_CONFIG.getJobsSubmitUrl();
-  const submitEndpoints: string[] = [];
-
-  // Try relative proxy endpoint first (avoids cross-origin CORS blocks on preview domains)
-  submitEndpoints.push('/api/jobs/enhance');
-  if (directJobs && directJobs.startsWith('http') && directJobs !== '/api/jobs/enhance') {
-    submitEndpoints.push(directJobs);
-  }
-
+  const endpoint = API_CONFIG.getJobsSubmitUrl();
   const startTime = Date.now();
 
   // Initial progress event
-  const startProgressTicker = () => {
-    onProgress?.({
-      stage: 'processing',
-      progressPercent: 0,
-      elapsedSeconds: 0,
-      message:
-        studioMode === 'studio'
-          ? 'Submitting image to Studio Mode (4× Real-ESRGAN + GFPGAN Face Restoration)...'
-          : `Submitting image to Real-ESRGAN ${validScale}× pipeline...`,
-      isEstimate: false,
-    });
-  };
+  onProgress?.({
+    stage: 'processing',
+    progressPercent: 0,
+    elapsedSeconds: 0,
+    message:
+      studioMode === 'studio'
+        ? 'Submitting image to Studio Mode (4× Real-ESRGAN + GFPGAN Face Restoration)...'
+        : `Submitting image to Real-ESRGAN ${validScale}× pipeline...`,
+    isEstimate: false,
+  });
 
-  const stopProgressTicker = () => {
-    // No-op kept for cleanup symmetry
-  };
-
-  const submitErrors: string[] = [];
-
-  for (const endpoint of submitEndpoints) {
-    if (signal?.aborted) {
-      throw new Error('Enhancement request was cancelled.');
-    }
-
-    startProgressTicker();
-
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: getHeaders(endpoint),
-        body: formData,
-        signal,
-      });
-
-      stopProgressTicker();
-
-      const contentType = (res.headers.get('content-type') || '').toLowerCase();
-
-      // Case A: Backend returns enhanced binary image directly (HTTP 200 with image/*)
-      if (res.ok && (contentType.startsWith('image/') || contentType.includes('application/octet-stream'))) {
-        const blob = await res.blob();
-        if (blob.size === 0) {
-          throw new Error('Backend returned an empty image (0 bytes).');
-        }
-
-        onProgress?.({
-          stage: 'completed',
-          progressPercent: 100,
-          elapsedSeconds: Math.round((Date.now() - startTime) / 1000),
-          message: 'Inference complete! Preparing image preview...',
-          isEstimate: false,
-        });
-
-        return buildUpscaleResult(blob, contentType || 'image/png', metadata, validScale, validModel, undefined, studioMode);
-      }
-
-      // Case B: Backend returns JSON (job submission with job_id or error)
-      if (contentType.includes('application/json')) {
-        const parsed = await parseJsonResponse<{ job_id?: string; status?: string; message?: string }>(
-          res,
-          `job submission (${endpoint})`
-        );
-
-        if (parsed.ok && parsed.data?.job_id) {
-          // Asynchronous jobs API: poll status until complete
-          return await pollAsyncJob(
-            parsed.data.job_id,
-            endpoint,
-            getHeaders,
-            startTime,
-            metadata,
-            validScale,
-            validModel,
-            signal,
-            onProgress,
-            studioMode
-          );
-        }
-
-        if (!parsed.ok) {
-          submitErrors.push(parsed.error);
-        } else {
-          submitErrors.push(parsed.data?.message || `Received unexpected JSON from ${endpoint}`);
-        }
-      } else {
-        const parsedErr = await parseJsonResponse(res, `job submission response (${endpoint})`);
-        submitErrors.push(parsedErr.ok ? JSON.stringify(parsedErr.data) : parsedErr.error);
-      }
-    } catch (err: unknown) {
-      stopProgressTicker();
-      if (err instanceof Error) {
-        if (err.name === 'AbortError') {
-          throw new Error('Enhancement request was cancelled.');
-        }
-        if (err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError')) {
-          submitErrors.push(
-            `CORS restriction reaching ${endpoint}: The FastAPI backend blocked cross-origin requests from ${typeof window !== 'undefined' ? window.location.origin : 'this origin'}. Please set QUALIBOOST_ALLOWED_ORIGINS="*" in your backend environment.`
-          );
-        } else {
-          submitErrors.push(`Failed to reach ${endpoint}: ${err.message}`);
-        }
-      } else {
-        submitErrors.push(`Failed to reach ${endpoint}: Network error`);
-      }
-    }
+  if (signal?.aborted) {
+    throw new Error('Enhancement request was cancelled.');
   }
 
-  const summary = submitErrors.join(' | ');
-  throw new Error(
-    summary ||
-      `Unable to connect to Real-ESRGAN backend at ${configuredBase || 'the configured endpoint'}. Please verify that the tunnel is active.`
-  );
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json, image/*, */*',
+      },
+      body: formData,
+      signal,
+    });
+
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+
+    // Case A: Backend returns enhanced binary image directly (HTTP 200 with image/*)
+    if (res.ok && (contentType.startsWith('image/') || contentType.includes('application/octet-stream'))) {
+      const blob = await res.blob();
+      if (blob.size === 0) {
+        throw new Error('Backend returned an empty image (0 bytes).');
+      }
+
+      onProgress?.({
+        stage: 'completed',
+        progressPercent: 100,
+        elapsedSeconds: Math.round((Date.now() - startTime) / 1000),
+        message: 'Inference complete! Preparing image preview...',
+        isEstimate: false,
+      });
+
+      return buildUpscaleResult(blob, contentType || 'image/png', metadata, validScale, validModel, undefined, studioMode);
+    }
+
+    // Case B: Backend returns JSON (job submission with job_id or error)
+    if (contentType.includes('application/json')) {
+      const parsed = await parseJsonResponse<{
+        job_id?: string;
+        status?: string;
+        message?: string;
+        detail?: any;
+        error?: any;
+      }>(res, `job submission (${endpoint})`);
+
+      if (parsed.ok && parsed.data?.job_id) {
+        // Asynchronous jobs API: poll status until complete
+        return await pollAsyncJob(
+          parsed.data.job_id,
+          startTime,
+          metadata,
+          validScale,
+          validModel,
+          signal,
+          onProgress,
+          studioMode
+        );
+      }
+
+      if (!parsed.ok) {
+        throw new Error(`HTTP ${res.status}: ${parsed.error}`);
+      } else {
+        const detailMsg = formatErrorDetail(parsed.data?.detail || parsed.data?.error || parsed.data?.message);
+        throw new Error(`HTTP ${res.status}: ${detailMsg || 'Received unexpected response from backend'}`);
+      }
+    } else {
+      const parsedErr = await parseJsonResponse(res, `job submission response (${endpoint})`);
+      const detailMsg = parsedErr.ok ? formatErrorDetail(parsedErr.data) : parsedErr.error;
+      throw new Error(`HTTP ${res.status}: ${detailMsg || res.statusText || 'Unexpected error'}`);
+    }
+  } catch (err: unknown) {
+    if (err instanceof Error) {
+      if (err.name === 'AbortError') {
+        throw new Error('Enhancement request was cancelled.');
+      }
+      if (err.message?.includes('Failed to fetch') || err.message?.includes('NetworkError')) {
+        throw new Error(
+          `CORS or Network error reaching ${endpoint}. Verify that the backend tunnel is active and cross-origin requests from ${typeof window !== 'undefined' ? window.location.origin : 'this origin'} are accepted.`
+        );
+      }
+      throw err;
+    }
+    throw new Error(`Failed to reach ${endpoint}: ${formatErrorDetail(err) || 'Network error'}`);
+  }
 }
 
 /**
@@ -233,8 +196,6 @@ export async function requestImageUpscale(
  */
 async function pollAsyncJob(
   jobId: string,
-  submissionEndpoint: string,
-  getHeaders: (url: string) => Record<string, string>,
   startTime: number,
   metadata: ImageMetadata,
   validScale: ScaleValue,
@@ -243,11 +204,8 @@ async function pollAsyncJob(
   onProgress?: (info: UpscaleProgressInfo) => void,
   studioMode: ProcessingStudioMode = 'standard'
 ): Promise<UpscaleResult> {
-  const rootBase = submissionEndpoint.startsWith('/')
-    ? ''
-    : submissionEndpoint.replace(/\/api\/jobs\/enhance\/?.*$/, '');
-  const statusEndpoint = rootBase ? `${rootBase}/api/jobs/${jobId}` : `/api/jobs/${jobId}`;
-  const resultEndpoint = rootBase ? `${rootBase}/api/jobs/${jobId}/result` : `/api/jobs/${jobId}/result`;
+  const statusEndpoint = API_CONFIG.getJobStatusUrl(jobId);
+  const resultEndpoint = API_CONFIG.getJobResultUrl(jobId);
 
   let currentPercent = 0;
 
@@ -267,7 +225,7 @@ async function pollAsyncJob(
 
   while (true) {
     if (signal?.aborted) {
-      fetch(statusEndpoint, { method: 'DELETE', headers: getHeaders(statusEndpoint) }).catch(() => {});
+      fetch(statusEndpoint, { method: 'DELETE' }).catch(() => {});
       throw new Error('Enhancement request was cancelled.');
     }
 
@@ -279,7 +237,9 @@ async function pollAsyncJob(
 
     const statusRes = await fetch(statusEndpoint, {
       method: 'GET',
-      headers: getHeaders(statusEndpoint),
+      headers: {
+        Accept: 'application/json',
+      },
       signal,
     });
 
@@ -295,7 +255,8 @@ async function pollAsyncJob(
     }
 
     if (statusData.status === 'failed') {
-      throw new Error(`Real-ESRGAN inference failed: ${statusData.error || 'Unknown engine error'}`);
+      const errDetail = formatErrorDetail(statusData.error) || 'Unknown engine error';
+      throw new Error(`Real-ESRGAN inference failed: ${errDetail}`);
     }
 
     if (statusData.status === 'cancelled') {
@@ -331,14 +292,17 @@ async function pollAsyncJob(
 
   const resultRes = await fetch(resultEndpoint, {
     method: 'GET',
-    headers: getHeaders(resultEndpoint),
+    headers: {
+      Accept: 'image/png, image/*, */*',
+    },
     signal,
   });
 
   const resultContentType = (resultRes.headers.get('content-type') || '').toLowerCase();
   if (!resultRes.ok || resultContentType.includes('text/html') || resultContentType.includes('application/json')) {
     const parsedErr = await parseJsonResponse(resultRes, `result download (${resultEndpoint})`);
-    throw new Error(parsedErr.ok ? JSON.stringify(parsedErr.data) : parsedErr.error);
+    const errDetail = parsedErr.ok ? formatErrorDetail(parsedErr.data) : parsedErr.error;
+    throw new Error(`HTTP ${resultRes.status}: ${errDetail || resultRes.statusText || 'Failed to download enhanced image'}`);
   }
 
   const blob = await resultRes.blob();
@@ -375,54 +339,30 @@ export async function downloadJobResultBlob(
     return cachedBlob;
   }
 
-  const configuredBase = sanitizeBaseUrl(API_CONFIG.getBaseUrl());
-  const pathWithQuery = `/api/jobs/${jobId}/result${format === 'jpeg' ? '?format=jpeg' : ''}`;
   const directUrl = API_CONFIG.getJobResultUrl(jobId) + (format === 'jpeg' ? '?format=jpeg' : '');
+  const headers: Record<string, string> = {
+    Accept: format === 'jpeg' ? 'image/jpeg, image/*, */*' : 'image/png, image/*, */*',
+  };
 
-  const endpointsToTry: string[] = [pathWithQuery];
-  if (directUrl && directUrl.startsWith('http') && directUrl !== pathWithQuery) {
-    endpointsToTry.push(directUrl);
+  const res = await fetch(directUrl, {
+    method: 'GET',
+    headers,
+  });
+
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+
+  if (!res.ok || contentType.includes('application/json') || contentType.includes('text/html')) {
+    const parsedErr = await parseJsonResponse(res, `image download (${directUrl})`);
+    const errDetail = parsedErr.ok ? formatErrorDetail(parsedErr.data) : parsedErr.error;
+    throw new Error(`HTTP ${res.status}: ${errDetail || res.statusText || 'Download failed'}`);
   }
 
-  let lastError = 'Failed to download enhanced image.';
-
-  for (const endpoint of endpointsToTry) {
-    try {
-      const headers: Record<string, string> = {
-        Accept: format === 'jpeg' ? 'image/jpeg, image/*, */*' : 'image/png, image/*, */*',
-      };
-      if (endpoint.startsWith('/') && configuredBase) {
-        headers['x-backend-target-url'] = configuredBase;
-      }
-
-      const res = await fetch(endpoint, {
-        method: 'GET',
-        headers,
-      });
-
-      const contentType = (res.headers.get('content-type') || '').toLowerCase();
-
-      if (!res.ok || contentType.includes('application/json') || contentType.includes('text/html')) {
-        const parsedErr = await parseJsonResponse(res, `image download (${endpoint})`);
-        lastError = parsedErr.ok ? JSON.stringify(parsedErr.data) : parsedErr.error;
-        continue;
-      }
-
-      const blob = await res.blob();
-      if (blob.size === 0) {
-        lastError = `Backend returned an empty ${format.toUpperCase()} image (0 bytes).`;
-        continue;
-      }
-
-      return blob;
-    } catch (err) {
-      if (err instanceof Error) {
-        lastError = err.message;
-      }
-    }
+  const blob = await res.blob();
+  if (blob.size === 0) {
+    throw new Error(`Backend returned an empty ${format.toUpperCase()} image (0 bytes).`);
   }
 
-  throw new Error(lastError);
+  return blob;
 }
 
 /**
