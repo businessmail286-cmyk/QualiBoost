@@ -100,12 +100,12 @@ export const BackendSettingsModal: React.FC<BackendSettingsModalProps> = ({
                   setUrlInput(e.target.value);
                   setTestResult(null);
                 }}
-                placeholder="https://none-salary-controllers-precision.trycloudflare.com"
+                placeholder="https://loving-pointer-worlds-elections.trycloudflare.com"
                 className="w-full px-3.5 py-2.5 bg-[#0a0a0a] border border-[#383838] rounded-lg text-xs font-mono text-white placeholder-[#555555] focus:outline-none focus:border-white transition-colors"
               />
             </div>
             <p className="text-[11px] text-[#777777] leading-relaxed">
-              Active backend runs on Google Colab via Cloudflare tunnel at <code className="text-[#A3A3A3]">https://none-salary-controllers-precision.trycloudflare.com</code>. You can paste a custom endpoint or leave empty to use this default.
+              Active backend runs on Google Colab via Cloudflare tunnel at <code className="text-[#A3A3A3]">https://loving-pointer-worlds-elections.trycloudflare.com</code>. You can paste a custom endpoint or leave empty to use this default.
             </p>
           </div>
 
@@ -114,7 +114,7 @@ export const BackendSettingsModal: React.FC<BackendSettingsModalProps> = ({
             <span className="text-[#666666]">Quick Fill:</span>
             <button
               type="button"
-              onClick={() => handleUsePreset('https://none-salary-controllers-precision.trycloudflare.com')}
+              onClick={() => handleUsePreset('https://loving-pointer-worlds-elections.trycloudflare.com')}
               className="px-2 py-1 rounded bg-[#1c1c1c] border border-[#2e2e2e] text-[#A3A3A3] hover:text-white hover:border-[#555555] transition-colors cursor-pointer font-mono"
             >
               Cloudflare Tunnel (Colab)
@@ -125,13 +125,6 @@ export const BackendSettingsModal: React.FC<BackendSettingsModalProps> = ({
               className="px-2 py-1 rounded bg-[#1c1c1c] border border-[#2e2e2e] text-[#A3A3A3] hover:text-white hover:border-[#555555] transition-colors cursor-pointer font-mono"
             >
               Reset to Default
-            </button>
-            <button
-              type="button"
-              onClick={() => handleUsePreset('http://127.0.0.1:8000')}
-              className="px-2 py-1 rounded bg-[#1c1c1c] border border-[#2e2e2e] text-[#A3A3A3] hover:text-white hover:border-[#555555] transition-colors cursor-pointer font-mono"
-            >
-              127.0.0.1:8000 (Local)
             </button>
           </div>
 

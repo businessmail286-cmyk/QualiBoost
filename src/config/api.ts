@@ -11,7 +11,7 @@ export interface BackendHealthStatus {
   checkedAt?: Date;
 }
 
-export const DEFAULT_PRODUCTION_API_URL = 'https://none-salary-controllers-precision.trycloudflare.com';
+export const DEFAULT_PRODUCTION_API_URL = 'https://loving-pointer-worlds-elections.trycloudflare.com';
 
 /**
  * Normalizes and sanitizes a backend base URL:
@@ -117,6 +117,7 @@ export const API_CONFIG = {
             'understood-centers-level-thee',
             'gravity-kid-starts-queen',
             'packages-separately-send-mobiles',
+            'none-salary-controllers-precision',
           ];
           if (sanitized && !staleKeywords.some((k) => sanitized.includes(k))) {
             return sanitized;
@@ -223,31 +224,31 @@ export async function checkBackendHealth(
       if (!contentType.includes('application/json')) {
         const textPreview = await response.text().catch(() => '');
         const sanitized = textPreview.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
-        if (response.status === 502 || response.status === 503) {
-          lastError = `Backend tunnel returned HTTP ${response.status}. The Cloudflare tunnel or Google Colab session may be disconnected.`;
-          lastStatusText = `Tunnel offline (${response.status})`;
+        if (response.status === 502 || response.status === 503 || response.status === 504) {
+          lastError = `HTTP ${response.status}: Backend tunnel is unreachable or disconnected. Google Colab session may need to be restarted.`;
+          lastStatusText = `Tunnel offline (HTTP ${response.status})`;
           continue;
         }
-        lastError = `Endpoint ${url} returned ${response.status} with non-JSON format (${contentType}): ${sanitized || 'HTML page'}`;
-        lastStatusText = `Format error (${response.status})`;
+        lastError = `HTTP ${response.status}: Endpoint ${url} returned non-JSON format (${contentType || 'HTML'}): ${sanitized || response.statusText || 'Unexpected format'}`;
+        lastStatusText = `HTTP ${response.status}`;
         continue;
       }
 
       if (!response.ok) {
         const errJson = await response.json().catch(() => null);
-        const detailMsg = errJson?.detail || errJson?.error || response.statusText;
+        const detailMsg = errJson?.detail || errJson?.error || errJson?.message || response.statusText;
 
         if (response.status === 401) {
           lastError =
-            '401 Unauthorized: Target reached an internal container daemon. Real-ESRGAN requires no authorization. Please verify the API Base URL in Settings.';
-          lastStatusText = 'Auth conflict (401)';
+            'HTTP 401 Unauthorized: Target reached an internal container daemon. Real-ESRGAN requires no authorization. Please verify the API Base URL in Settings.';
+          lastStatusText = 'Auth conflict (HTTP 401)';
           continue;
         } else if (response.status === 503 || response.status === 502) {
-          lastError = detailMsg || `Backend service returned HTTP ${response.status} (Service Unavailable).`;
-          lastStatusText = `Offline (${response.status})`;
+          lastError = `HTTP ${response.status}: ${detailMsg || 'Backend service unavailable. The Cloudflare tunnel may be offline.'}`;
+          lastStatusText = `Offline (HTTP ${response.status})`;
           continue;
         } else {
-          lastError = `Health check responded with status ${response.status} (${detailMsg || response.statusText})`;
+          lastError = `HTTP ${response.status}: Health check failed (${detailMsg || response.statusText})`;
           lastStatusText = `HTTP ${response.status}`;
         }
 

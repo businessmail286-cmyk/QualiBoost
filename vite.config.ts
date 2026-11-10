@@ -41,7 +41,7 @@ function getTargetUrl(): string {
   if (process.env.VITE_API_BASE_URL?.trim()) {
     return sanitizeTargetUrl(process.env.VITE_API_BASE_URL.trim());
   }
-  return 'https://none-salary-controllers-precision.trycloudflare.com';
+  return 'https://loving-pointer-worlds-elections.trycloudflare.com';
 }
 
 function qualiboostProxyPlugin(): Plugin {
